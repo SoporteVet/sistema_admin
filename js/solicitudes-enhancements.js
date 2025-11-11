@@ -246,3 +246,5 @@ const solicitudesEnhancements = new SolicitudesEnhancements();
 window.solicitudesEnhancements = solicitudesEnhancements;
 export default solicitudesEnhancements;
 
+
+

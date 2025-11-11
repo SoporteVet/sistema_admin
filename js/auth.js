@@ -221,15 +221,44 @@ const auth = new Auth();
             
             // Create default departments
             const departamentos = [
+                { codigo: 'GG', nombre: 'Gerencia General' },
                 { codigo: 'IT', nombre: 'Tecnología de la Información' },
                 { codigo: 'RH', nombre: 'Recursos Humanos' },
                 { codigo: 'FI', nombre: 'Finanzas' },
                 { codigo: 'MK', nombre: 'Mercadeo' },
-                { codigo: 'OP', nombre: 'Operaciones' }
+                { codigo: 'OP', nombre: 'Operaciones' },
+                { codigo: 'IN', nombre: 'Internos Documentos' }
             ];
             
             for (const dept of departamentos) {
-                await db.add('departamentos', dept);
+                // Verificar si el departamento ya existe antes de agregarlo
+                const existing = await db.query('departamentos', 'codigo', dept.codigo);
+                if (existing.length === 0) {
+                    await db.add('departamentos', dept);
+                }
+            }
+        } else {
+            // Si ya hay usuarios, verificar y agregar departamentos faltantes
+            const departamentosRequeridos = [
+                { codigo: 'GG', nombre: 'Gerencia General' },
+                { codigo: 'IT', nombre: 'Tecnología de la Información' },
+                { codigo: 'RH', nombre: 'Recursos Humanos' },
+                { codigo: 'FI', nombre: 'Finanzas' },
+                { codigo: 'MK', nombre: 'Mercadeo' },
+                { codigo: 'OP', nombre: 'Operaciones' },
+                { codigo: 'IN', nombre: 'Internos Documentos' }
+            ];
+            
+            for (const dept of departamentosRequeridos) {
+                try {
+                    const existing = await db.query('departamentos', 'codigo', dept.codigo);
+                    if (existing.length === 0) {
+                        await db.add('departamentos', dept);
+                        console.log(`Departamento agregado: ${dept.codigo} - ${dept.nombre}`);
+                    }
+                } catch (error) {
+                    console.warn(`No se pudo agregar el departamento ${dept.codigo}:`, error);
+                }
             }
         }
     } catch (error) {

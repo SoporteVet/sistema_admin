@@ -15,6 +15,247 @@ class FormsManager {
         this.departamentos = [];
         this.vacationCalendar = new VacationCalendar();
         this.loadDepartamentos();
+        
+        // Estructura de códigos por departamento y categoría
+        this.codigosComunicados = {
+            // GERENCIA GENERAL - DG-100
+            'GG': {
+                codigoBase: 'DG-100',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    },
+                    'memorando': {
+                        nombre: 'Memorando',
+                        subcodigos: {
+                            'interno': '2.1',
+                            'externo': '2.2'
+                        }
+                    },
+                    'investigacion': {
+                        nombre: 'Investigación',
+                        subcodigos: {
+                            'interno': '3',
+                            'externo': '3'
+                        }
+                    }
+                }
+            },
+            // FINANZAS - DG-F-101
+            'FI': {
+                codigoBase: 'DG-F-101',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    },
+                    'memorando': {
+                        nombre: 'Memorando',
+                        subcodigos: {
+                            'interno': '2.1',
+                            'externo': '2.2'
+                        }
+                    },
+                    'prestamo': {
+                        nombre: 'Préstamo',
+                        subcodigos: {
+                            'interno': '3.1',
+                            'externo': '3.1'
+                        }
+                    },
+                    'acuerdo-pago': {
+                        nombre: 'Acuerdo de Pago',
+                        subcodigos: {
+                            'prestamo': '4.1',
+                            'consumible': '4.2'
+                        }
+                    }
+                }
+            },
+            // INTERNOS DOCUMENTOS - IN.200
+            'IN': {
+                codigoBase: 'IN.200',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    }
+                }
+            },
+            // RECURSOS HUMANOS - RH.300
+            'RH': {
+                codigoBase: 'RH.300',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    },
+                    'memorando': {
+                        nombre: 'Memorando',
+                        subcodigos: {
+                            'interno': '2.1',
+                            'externo': '2.2'
+                        }
+                    },
+                    'consentimiento': {
+                        nombre: 'Consentimiento',
+                        subcodigos: {
+                            'liberacion-condicionada': '3.1',
+                            'salida-condicionada': '3.2',
+                            'salida-24h': '3.3',
+                            'internamiento': '3.4',
+                            'liberacion': '3.5'
+                        }
+                    },
+                    'informe': {
+                        nombre: 'Informe',
+                        subcodigos: {
+                            'ingreso-paciente': '4.1',
+                            'hojas-anestesia': '4.2',
+                            'epicrisis': '4.3'
+                        }
+                    },
+                    'norma': {
+                        nombre: 'Norma',
+                        subcodigos: {
+                            'hospitalizacion': '5.1'
+                        }
+                    }
+                }
+            },
+            // TECNOLOGÍA DE LA INFORMACIÓN - IT-400
+            'IT': {
+                codigoBase: 'IT-400',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    },
+                    'memorando': {
+                        nombre: 'Memorando',
+                        subcodigos: {
+                            'interno': '2.1',
+                            'externo': '2.2'
+                        }
+                    },
+                    'reporte-tecnico': {
+                        nombre: 'Reporte Técnico',
+                        subcodigos: {
+                            'interno': '3.1',
+                            'externo': '3.2'
+                        }
+                    },
+                    'solicitud-sistema': {
+                        nombre: 'Solicitud de Sistema',
+                        subcodigos: {
+                            'nuevo-sistema': '4.1',
+                            'mantenimiento': '4.2',
+                            'actualizacion': '4.3'
+                        }
+                    }
+                }
+            },
+            // MERCADEO - MK-500
+            'MK': {
+                codigoBase: 'MK-500',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    },
+                    'memorando': {
+                        nombre: 'Memorando',
+                        subcodigos: {
+                            'interno': '2.1',
+                            'externo': '2.2'
+                        }
+                    },
+                    'campana': {
+                        nombre: 'Campaña',
+                        subcodigos: {
+                            'lanzamiento': '3.1',
+                            'promocion': '3.2',
+                            'evento': '3.3'
+                        }
+                    },
+                    'reporte-marketing': {
+                        nombre: 'Reporte de Marketing',
+                        subcodigos: {
+                            'analisis': '4.1',
+                            'resultados': '4.2',
+                            'proyeccion': '4.3'
+                        }
+                    }
+                }
+            },
+            // OPERACIONES - OP-600
+            'OP': {
+                codigoBase: 'OP-600',
+                categorias: {
+                    'comunicacion-oficial': {
+                        nombre: 'Comunicación Oficial',
+                        subcodigos: {
+                            'interno': '1.1',
+                            'externo': '1.2'
+                        }
+                    },
+                    'memorando': {
+                        nombre: 'Memorando',
+                        subcodigos: {
+                            'interno': '2.1',
+                            'externo': '2.2'
+                        }
+                    },
+                    'procedimiento': {
+                        nombre: 'Procedimiento',
+                        subcodigos: {
+                            'operativo': '3.1',
+                            'seguridad': '3.2',
+                            'calidad': '3.3'
+                        }
+                    },
+                    'reporte-operativo': {
+                        nombre: 'Reporte Operativo',
+                        subcodigos: {
+                            'diario': '4.1',
+                            'semanal': '4.2',
+                            'mensual': '4.3',
+                            'incidente': '4.4'
+                        }
+                    }
+                }
+            }
+        };
+        
+        // Mapeo de códigos de departamento a claves de códigosComunicados
+        this.mapeoDepartamentos = {
+            'RH': 'RH',
+            'FI': 'FI',
+            'IT': 'IT',
+            'MK': 'MK',
+            'OP': 'OP',
+            'GG': 'GG',  // Si existe Gerencia General
+            'IN': 'IN'   // Si existe Internos
+        };
     }
 
     /**
@@ -47,14 +288,391 @@ class FormsManager {
     }
 
     /**
+     * Get codigo configuration for a departamento
+     */
+    getCodigoConfig(departamento) {
+        const deptKey = this.mapeoDepartamentos[departamento] || departamento;
+        return this.codigosComunicados[deptKey] || null;
+    }
+
+    /**
+     * Get available categorias for a departamento
+     */
+    getCategorias(departamento) {
+        const config = this.getCodigoConfig(departamento);
+        if (!config) return [];
+        return Object.keys(config.categorias).map(key => ({
+            key,
+            nombre: config.categorias[key].nombre
+        }));
+    }
+
+    /**
+     * Get subcodigos for a categoria
+     */
+    getSubcodigos(departamento, categoria, tipo) {
+        const config = this.getCodigoConfig(departamento);
+        if (!config || !config.categorias[categoria]) return null;
+        
+        const categoriaData = config.categorias[categoria];
+        const subcodigos = categoriaData.subcodigos;
+        
+        // Para categorías que usan tipo (interno/externo)
+        if (subcodigos[tipo]) {
+            return {
+                subcodigo: subcodigos[tipo],
+                requiereSubcategoria: false
+            };
+        }
+        
+        // Para categorías que requieren subcategoría específica
+        return {
+            subcodigos: subcodigos,
+            requiereSubcategoria: true
+        };
+    }
+
+    /**
      * Generate unique code for comunicado
      */
-    async generateComunicadoCode(departamento) {
-        const year = new Date().getFullYear();
-        const comunicados = await db.getComunicadosByDepartamento(departamento);
-        const yearComunicados = comunicados.filter(c => c.fecha.startsWith(year.toString()));
-        const nextNumber = String(yearComunicados.length + 1).padStart(3, '0');
-        return `${departamento}-${year}-${nextNumber}`;
+    async generateComunicadoCode(departamento, categoria, tipo, subcategoria = null) {
+        const config = this.getCodigoConfig(departamento);
+        
+        // Si no hay configuración, usar formato antiguo
+        if (!config) {
+            const year = new Date().getFullYear();
+            const comunicados = await db.getComunicadosByDepartamento(departamento);
+            const yearComunicados = comunicados.filter(c => c.fecha.startsWith(year.toString()));
+            const nextNumber = String(yearComunicados.length + 1).padStart(3, '0');
+            return `${departamento}-${year}-${nextNumber}`;
+        }
+
+        // Obtener subcódigo
+        let subcodigo;
+        let subcodigoInfo = tipo ? this.getSubcodigos(departamento, categoria, tipo) : null;
+        
+        // Si no hay info con tipo, verificar si la categoría tiene subcódigos que no dependen del tipo
+        if (!subcodigoInfo) {
+            const categoriaData = config.categorias[categoria];
+            const subcodigos = categoriaData.subcodigos;
+            const keys = Object.keys(subcodigos);
+            
+            // Si tiene subcódigos que no son "interno" o "externo", requiere subcategoría
+            if (keys.length > 0 && !keys.includes('interno') && !keys.includes('externo')) {
+                if (!subcategoria || !subcodigos[subcategoria]) {
+                    throw new Error('Se requiere una subcategoría para esta categoría');
+                }
+                subcodigo = subcodigos[subcategoria];
+            } else {
+                throw new Error('No se pudo obtener la configuración de subcódigo');
+            }
+        } else {
+            if (subcodigoInfo.requiereSubcategoria) {
+                if (!subcategoria || !subcodigoInfo.subcodigos[subcategoria]) {
+                    throw new Error('Se requiere una subcategoría para esta categoría');
+                }
+                subcodigo = subcodigoInfo.subcodigos[subcategoria];
+            } else {
+                subcodigo = subcodigoInfo.subcodigo;
+            }
+        }
+
+        // Obtener número secuencial para este código base + subcódigo
+        const codigoBase = `${config.codigoBase}-${subcodigo}`;
+        const allComunicados = await db.getAll('comunicados');
+        const matchingComunicados = allComunicados.filter(c => 
+            c.codigo && c.codigo.startsWith(codigoBase)
+        );
+        
+        const nextNumber = String(matchingComunicados.length + 1).padStart(3, '0');
+        return `${codigoBase}-${nextNumber}`;
+    }
+
+    /**
+     * Update categorias select based on departamento
+     */
+    updateCategoriasSelect() {
+        const departamentoSelect = document.getElementById('comunicado-departamento');
+        const categoriaSelect = document.getElementById('comunicado-categoria');
+        const categoriaGroup = document.getElementById('comunicado-categoria-group');
+        const subcategoriaContainer = document.getElementById('comunicado-subcategoria-container');
+        const subcategoriaSelect = document.getElementById('comunicado-subcategoria');
+        
+        if (!departamentoSelect || !categoriaSelect) {
+            console.warn('updateCategoriasSelect: No se encontraron los elementos del formulario');
+            return;
+        }
+        
+        const departamento = departamentoSelect.value;
+        console.log('updateCategoriasSelect: Departamento seleccionado:', departamento);
+        
+        // Si no hay departamento seleccionado, ocultar categorías
+        if (!departamento) {
+            if (categoriaGroup) {
+                categoriaGroup.style.display = 'none';
+            }
+            categoriaSelect.innerHTML = '<option value="">Seleccione...</option>';
+            categoriaSelect.required = false;
+            categoriaSelect.disabled = true;
+            if (subcategoriaContainer) {
+                subcategoriaContainer.style.display = 'none';
+            }
+            if (subcategoriaSelect) {
+                subcategoriaSelect.innerHTML = '';
+                subcategoriaSelect.required = false;
+            }
+            return;
+        }
+        
+        const categorias = this.getCategorias(departamento);
+        console.log('updateCategoriasSelect: Categorías encontradas:', categorias);
+        
+        // Limpiar opciones
+        categoriaSelect.innerHTML = '<option value="">Seleccione...</option>';
+        if (subcategoriaSelect) {
+            subcategoriaSelect.innerHTML = '';
+        }
+        if (subcategoriaContainer) {
+            subcategoriaContainer.style.display = 'none';
+        }
+        
+        // Si hay categorías disponibles, mostrar el campo y agregarlas
+        if (categorias.length > 0) {
+            if (categoriaGroup) {
+                categoriaGroup.style.display = 'block';
+                console.log('updateCategoriasSelect: Mostrando campo de categoría');
+            }
+            categorias.forEach(cat => {
+                const option = document.createElement('option');
+                option.value = cat.key;
+                option.textContent = cat.nombre;
+                categoriaSelect.appendChild(option);
+            });
+            categoriaSelect.required = true;
+            categoriaSelect.disabled = false;
+        } else {
+            if (categoriaGroup) {
+                categoriaGroup.style.display = 'none';
+            }
+            categoriaSelect.required = false;
+            categoriaSelect.disabled = true;
+            console.log('updateCategoriasSelect: No hay categorías para este departamento');
+        }
+        
+        // Actualizar subcategorías si ya hay tipo seleccionado o si la categoría no depende del tipo
+        const tipoSelect = document.getElementById('comunicado-tipo');
+        if (categoriaSelect.value) {
+            this.updateSubcategoriasSelect();
+        }
+    }
+
+    /**
+     * Update subcategorias select based on categoria and tipo
+     */
+    updateSubcategoriasSelect() {
+        const departamentoSelect = document.getElementById('comunicado-departamento');
+        const categoriaSelect = document.getElementById('comunicado-categoria');
+        const tipoSelect = document.getElementById('comunicado-tipo');
+        const subcategoriaContainer = document.getElementById('comunicado-subcategoria-container');
+        const subcategoriaSelect = document.getElementById('comunicado-subcategoria');
+        
+        if (!departamentoSelect || !categoriaSelect || !subcategoriaSelect) return;
+        
+        const departamento = departamentoSelect.value;
+        const categoria = categoriaSelect.value;
+        const tipo = tipoSelect ? tipoSelect.value : '';
+        
+        if (!departamento || !categoria) {
+            if (subcategoriaContainer) {
+                subcategoriaContainer.style.display = 'none';
+            }
+            return;
+        }
+        
+        // Si no hay tipo pero la categoría puede requerir subcategoría, intentar obtenerla
+        const subcodigoInfo = tipo ? this.getSubcodigos(departamento, categoria, tipo) : null;
+        
+        // Si no hay info con tipo, verificar si la categoría tiene subcódigos que no dependen del tipo
+        if (!subcodigoInfo) {
+            const config = this.getCodigoConfig(departamento);
+            if (config && config.categorias[categoria]) {
+                const categoriaData = config.categorias[categoria];
+                const subcodigos = categoriaData.subcodigos;
+                
+                // Si tiene subcódigos que no son "interno" o "externo", requiere subcategoría
+                const keys = Object.keys(subcodigos);
+                if (keys.length > 0 && !keys.includes('interno') && !keys.includes('externo')) {
+                    subcategoriaSelect.innerHTML = '<option value="">Seleccione...</option>';
+                    keys.forEach(key => {
+                        const option = document.createElement('option');
+                        option.value = key;
+                        const nombre = this.getSubcategoriaNombre(departamento, categoria, key);
+                        option.textContent = nombre;
+                        subcategoriaSelect.appendChild(option);
+                    });
+                    if (subcategoriaContainer) {
+                        subcategoriaContainer.style.display = 'block';
+                    }
+                    subcategoriaSelect.required = true;
+                    return;
+                }
+            }
+            
+            if (subcategoriaContainer) {
+                subcategoriaContainer.style.display = 'none';
+            }
+            return;
+        }
+        
+        // Si requiere subcategoría, mostrar el select
+        if (subcodigoInfo.requiereSubcategoria) {
+            subcategoriaSelect.innerHTML = '<option value="">Seleccione...</option>';
+            Object.keys(subcodigoInfo.subcodigos).forEach(key => {
+                const option = document.createElement('option');
+                option.value = key;
+                // Obtener nombre descriptivo de la subcategoría
+                const nombre = this.getSubcategoriaNombre(departamento, categoria, key);
+                option.textContent = nombre;
+                subcategoriaSelect.appendChild(option);
+            });
+            if (subcategoriaContainer) {
+                subcategoriaContainer.style.display = 'block';
+            }
+            subcategoriaSelect.required = true;
+        } else {
+            if (subcategoriaContainer) {
+                subcategoriaContainer.style.display = 'none';
+            }
+            subcategoriaSelect.required = false;
+        }
+    }
+
+    /**
+     * Get nombre for subcategoria
+     */
+    getSubcategoriaNombre(departamento, categoria, subcategoriaKey) {
+        const nombres = {
+            'prestamo': {
+                'prestamo': 'Contrato de préstamo'
+            },
+            'acuerdo-pago': {
+                'prestamo': 'Acuerdo de pago por préstamo',
+                'consumible': 'Acuerdo de pago por cobro de consumible'
+            },
+            'consentimiento': {
+                'liberacion-condicionada': 'Consentimiento de liberación condicionada',
+                'salida-condicionada': 'Consentimiento de salida condicionada',
+                'salida-24h': 'Consentimiento de salida condicionada por 24 horas',
+                'internamiento': 'Consentimiento de internamiento',
+                'liberacion': 'Consentimiento de liberación'
+            },
+            'informe': {
+                'ingreso-paciente': 'Informe de ingreso de paciente al área de internamiento',
+                'hojas-anestesia': 'Hojas de anestesia',
+                'epicrisis': 'Epicrisis'
+            },
+            'norma': {
+                'hospitalizacion': 'Normas de hospitalización'
+            },
+            'solicitud-sistema': {
+                'nuevo-sistema': 'Solicitud de nuevo sistema',
+                'mantenimiento': 'Solicitud de mantenimiento',
+                'actualizacion': 'Solicitud de actualización'
+            },
+            'campana': {
+                'lanzamiento': 'Campaña de lanzamiento',
+                'promocion': 'Campaña promocional',
+                'evento': 'Campaña de evento'
+            },
+            'reporte-marketing': {
+                'analisis': 'Reporte de análisis de marketing',
+                'resultados': 'Reporte de resultados',
+                'proyeccion': 'Reporte de proyección'
+            },
+            'procedimiento': {
+                'operativo': 'Procedimiento operativo',
+                'seguridad': 'Procedimiento de seguridad',
+                'calidad': 'Procedimiento de calidad'
+            },
+            'reporte-operativo': {
+                'diario': 'Reporte operativo diario',
+                'semanal': 'Reporte operativo semanal',
+                'mensual': 'Reporte operativo mensual',
+                'incidente': 'Reporte de incidente'
+            }
+        };
+        
+        return nombres[categoria]?.[subcategoriaKey] || subcategoriaKey;
+    }
+
+    /**
+     * Estimate number of pages for comunicado content
+     */
+    estimarPaginasComunicado() {
+        const contenidoTextarea = document.getElementById('comunicado-contenido');
+        const paginasEstimadas = document.getElementById('comunicado-paginas-estimadas');
+        const numPaginas = document.getElementById('comunicado-num-paginas');
+        
+        if (!contenidoTextarea || !paginasEstimadas || !numPaginas) return;
+        
+        const contenido = contenidoTextarea.value.trim();
+        if (!contenido) {
+            paginasEstimadas.style.display = 'none';
+            return;
+        }
+        
+        // Crear un elemento temporal para medir el contenido
+        const tempDiv = document.createElement('div');
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.left = '-9999px';
+        tempDiv.style.width = '800px'; // Ancho del wrapper
+        tempDiv.style.fontFamily = 'Arial, Helvetica, sans-serif';
+        tempDiv.style.fontSize = '16px';
+        tempDiv.style.lineHeight = '1.8';
+        tempDiv.style.padding = '2rem';
+        tempDiv.style.background = '#ffffff';
+        
+        // Simular el contenido formateado
+        const paragraphs = contenido.split('\n').filter(p => p.trim());
+        paragraphs.forEach(p => {
+            const pElem = document.createElement('p');
+            pElem.style.marginBottom = '1.25rem';
+            pElem.textContent = p.trim();
+            tempDiv.appendChild(pElem);
+        });
+        
+        document.body.appendChild(tempDiv);
+        const contentHeight = tempDiv.scrollHeight;
+        document.body.removeChild(tempDiv);
+        
+        // Calcular páginas (similar a calcularPaginasComunicado)
+        // Tamaño A4: 210mm x 297mm
+        const A4_HEIGHT_MM = 297;
+        const wrapperWidth = 800; // px
+        const wrapperWidthMM = 210; // mm
+        const scaleFactor = wrapperWidthMM / wrapperWidth;
+        const contentHeightMM = contentHeight * scaleFactor;
+        
+        // Altura usable por página (considerando header, footer y márgenes)
+        // Header aprox: 80mm, Footer aprox: 30mm, Márgenes: 20mm
+        const headerHeightMM = 80;
+        const footerHeightMM = 30;
+        const marginMM = 20;
+        const usableHeightMM = A4_HEIGHT_MM - headerHeightMM - footerHeightMM - marginMM; // ~167mm
+        
+        const totalPages = Math.max(1, Math.ceil(contentHeightMM / usableHeightMM));
+        
+        numPaginas.textContent = totalPages;
+        paginasEstimadas.style.display = 'inline';
+        
+        // Cambiar color si es más de una página
+        if (totalPages > 1) {
+            paginasEstimadas.style.color = '#3b82f6';
+            paginasEstimadas.style.fontWeight = '600';
+        } else {
+            paginasEstimadas.style.color = '#6b7280';
+            paginasEstimadas.style.fontWeight = '400';
+        }
     }
 
     /**
@@ -74,8 +692,19 @@ class FormsManager {
         
         const tipo = document.getElementById('comunicado-tipo').value;
         const departamento = document.getElementById('comunicado-departamento').value;
-        const titulo = document.getElementById('comunicado-titulo').value.trim();
+        const categoria = document.getElementById('comunicado-categoria')?.value || '';
+        const subcategoria = document.getElementById('comunicado-subcategoria')?.value || null;
+        const para = document.getElementById('comunicado-para').value.trim();
+        const de = document.getElementById('comunicado-de').value.trim();
+        const asunto = document.getElementById('comunicado-asunto').value.trim();
         const contenido = document.getElementById('comunicado-contenido').value.trim();
+
+        // Validar que si hay categorías disponibles, se haya seleccionado una
+        const config = this.getCodigoConfig(departamento);
+        if (config && !categoria) {
+            showNotification('Por favor seleccione una categoría', 'error');
+            return;
+        }
 
         // Show loading state
         const originalText = submitBtn.innerHTML;
@@ -85,13 +714,17 @@ class FormsManager {
 
         try {
             const user = auth.getCurrentUser();
-            const codigo = await this.generateComunicadoCode(departamento);
+            const codigo = await this.generateComunicadoCode(departamento, categoria, tipo, subcategoria);
 
             const comunicado = {
                 codigo,
                 tipo,
                 departamento,
-                titulo,
+                categoria: categoria || null,
+                subcategoria: subcategoria || null,
+                para,
+                de,
+                asunto,
                 contenido,
                 usuarioId: user.id,
                 usuarioNombre: user.nombre,
@@ -106,13 +739,16 @@ class FormsManager {
             this.closeModal('modal-comunicado');
             form.reset();
             
+            // Reset categorias
+            this.updateCategoriasSelect();
+            
             // Reload comunicados if on that page
             if (document.getElementById('page-comunicados').style.display !== 'none') {
                 window.app?.loadComunicados?.();
             }
         } catch (error) {
             console.error('Error creating comunicado:', error);
-            showNotification('Error al crear el comunicado', 'error');
+            showNotification(error.message || 'Error al crear el comunicado', 'error');
         } finally {
             // Reset button
             submitBtn.disabled = false;
@@ -523,7 +1159,12 @@ class FormsManager {
             
             // Setup form validation
             if (modalId === 'modal-comunicado') {
+                // Reset categorias when opening modal
                 setTimeout(() => {
+                    // Asegurar que los departamentos estén cargados
+                    this.updateDepartamentoSelects();
+                    // Reset categorias
+                    this.updateCategoriasSelect();
                     formValidation.setupFormValidation('form-comunicado');
                 }, 100);
             } else if (modalId === 'modal-solicitud') {
@@ -664,6 +1305,35 @@ document.addEventListener('DOMContentLoaded', () => {
     const comunicadoForm = document.getElementById('form-comunicado');
     if (comunicadoForm) {
         comunicadoForm.addEventListener('submit', (e) => formsManager.handleComunicadoSubmit(e));
+    }
+    
+    // Usar delegación de eventos para los selects que pueden no estar disponibles al inicio
+    document.addEventListener('change', (e) => {
+        // Handle departamento change - update categorias
+        if (e.target && e.target.id === 'comunicado-departamento') {
+            console.log('Event listener: Cambio en departamento detectado');
+            formsManager.updateCategoriasSelect();
+        }
+        
+        // Handle tipo change - update subcategorias
+        if (e.target && e.target.id === 'comunicado-tipo') {
+            console.log('Event listener: Cambio en tipo detectado');
+            formsManager.updateSubcategoriasSelect();
+        }
+        
+        // Handle categoria change - update subcategorias
+        if (e.target && e.target.id === 'comunicado-categoria') {
+            console.log('Event listener: Cambio en categoría detectado');
+            formsManager.updateSubcategoriasSelect();
+        }
+    });
+
+    // Calcular páginas estimadas mientras se escribe el contenido
+    const contenidoTextarea = document.getElementById('comunicado-contenido');
+    if (contenidoTextarea) {
+        contenidoTextarea.addEventListener('input', () => {
+            formsManager.estimarPaginasComunicado();
+        });
     }
 
     // Solicitud form

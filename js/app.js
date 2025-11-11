@@ -9,7 +9,7 @@ import formsManager from './forms.js';
 import signatureManager from './signature.js';
 import { showNotification } from './notifications.js';
 import formValidation from './form-validation.js';
-import DarkMode from './dark-mode.js';
+// Dark mode disabled - using light mode only
 import keyboardShortcuts from './keyboard-shortcuts.js';
 import Charts from './charts.js';
 import ExportSystem from './export.js';
@@ -152,10 +152,11 @@ class App {
             adminLink.style.display = 'none';
         }
         
-        // Initialize dark mode
-        if (typeof DarkMode !== 'undefined') {
-            this.darkMode = new DarkMode();
-        }
+        // Dark mode disabled - using light mode only
+        // Remove dark mode class if present
+        document.documentElement.classList.remove('dark-mode');
+        // Clear dark mode preference from localStorage
+        localStorage.removeItem('darkMode');
         
         // Initialize charts
         this.charts = new Charts();
@@ -431,22 +432,38 @@ class App {
         }
 
         comunicadosList.innerHTML = comunicados.map(c => `
-            <div class="comunicado-card">
+            <div class="comunicado-card" style="cursor: pointer;" data-comunicado-id="${c.id}">
                 <div class="comunicado-header">
                     <span class="comunicado-codigo">${c.codigo}</span>
                     <span class="comunicado-tipo badge-${c.tipo}">${c.tipo.toUpperCase()}</span>
                 </div>
-                <h3 class="comunicado-titulo">${this.escapeHtml(c.titulo)}</h3>
+                <h3 class="comunicado-titulo">${this.escapeHtml(c.asunto || c.titulo || 'Sin asunto')}</h3>
                 <p class="comunicado-contenido">${this.escapeHtml(c.contenido.substring(0, 200))}${c.contenido.length > 200 ? '...' : ''}</p>
                 <div class="comunicado-footer">
                     <span class="comunicado-departamento">${c.departamento}</span>
                     <span class="comunicado-fecha">${this.formatDate(c.fecha)}</span>
-                    <button class="btn btn-sm btn-secondary export-pdf-btn" data-comunicado-id="${c.id}" title="Exportar este comunicado a PDF" style="display: inline-flex; align-items: center; gap: 4px;">
-                        <span>📄</span> PDF
-                    </button>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-sm btn-secondary firmas-btn" data-comunicado-id="${c.id}" title="Ver firmas" style="display: inline-flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
+                            <span>✍️</span> Firmas
+                        </button>
+                        <button class="btn btn-sm btn-secondary export-pdf-btn" data-comunicado-id="${c.id}" title="Exportar este comunicado a PDF" style="display: inline-flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
+                            <span>📄</span> PDF
+                        </button>
+                    </div>
                 </div>
             </div>
         `).join('');
+        
+        // Agregar event listeners para abrir el comunicado al hacer clic
+        comunicadosList.querySelectorAll('.comunicado-card').forEach(card => {
+            card.addEventListener('click', async (e) => {
+                if (e.target.closest('.export-pdf-btn')) return; // No abrir si se hace clic en el botón PDF
+                const id = parseInt(card.getAttribute('data-comunicado-id'));
+                if (id) {
+                    await this.showComunicadoDetalle(id);
+                }
+            });
+        });
         
         // Attach event listeners to PDF buttons
         comunicadosList.querySelectorAll('.export-pdf-btn').forEach(btn => {
@@ -460,6 +477,496 @@ class App {
                 }
             });
         });
+
+        // Attach event listeners to firmas buttons
+        comunicadosList.querySelectorAll('.firmas-btn').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const id = parseInt(btn.getAttribute('data-comunicado-id'));
+                if (id && window.app && window.app.mostrarFirmasComunicado) {
+                    await window.app.mostrarFirmasComunicado(id);
+                } else {
+                    showNotification('Error: No se pudo obtener el ID del comunicado', 'error');
+                }
+            });
+        });
+    }
+
+    /**
+     * Show comunicado detail in document format
+     */
+    async showComunicadoDetalle(id) {
+        try {
+            const comunicado = await db.get('comunicados', id);
+            if (!comunicado) {
+                showNotification('Comunicado no encontrado', 'error');
+                return;
+            }
+
+            const documentoContainer = document.getElementById('comunicado-documento');
+            if (!documentoContainer) return;
+
+            // Obtener información del departamento
+            const departamentos = await db.getAll('departamentos');
+            const deptInfo = departamentos.find(d => d.codigo === comunicado.departamento);
+            const deptNombre = deptInfo ? deptInfo.nombre : comunicado.departamento;
+
+            // Formatear fecha
+            const fechaComunicado = this.formatDate(comunicado.fecha);
+            const fechaCreacion = new Date(comunicado.fechaCreacion);
+            const fechaCreacionFormato = fechaCreacion.toLocaleDateString('es-ES', { 
+                day: '2-digit', 
+                month: '2-digit', 
+                year: 'numeric' 
+            });
+
+            // Determinar el tipo de comunicación para el título
+            const tipoTexto = comunicado.tipo === 'interno' ? 'INTERNA' : 'EXTERNA';
+            const tipoTextoCompleto = `COMUNICACIÓN OFICIAL ${tipoTexto}`;
+
+            // Renderizar el documento
+            documentoContainer.innerHTML = `
+                <div class="comunicado-documento-wrapper">
+                    <div class="comunicado-documento-header">
+                        <div class="comunicado-logo-section">
+                            <div class="comunicado-logo-placeholder">
+                                <img src="img/empresa.jpg" alt="Logo de la Empresa" class="comunicado-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                <div class="logo-circle" style="display: none;">
+                                    <span>🏥</span>
+                                </div>
+                            </div>
+                            <div class="comunicado-empresa-info">
+                                <h1>VETERINARIA SAN MARTIN DE PORRES</h1>
+                                <p class="comunicado-empresa-id">3-105-761559</p>
+                            </div>
+                        </div>
+                        <div class="comunicado-metadata">
+                            <div class="comunicado-metadata-item">Página:</div>
+                            <div class="comunicado-metadata-item" id="comunicado-pagina-actual">1 de 1</div>
+                            <div class="comunicado-metadata-item">Código:</div>
+                            <div class="comunicado-metadata-item">${comunicado.codigo || 'N/A'}</div>
+                            <div class="comunicado-metadata-item">Fecha:</div>
+                            <div class="comunicado-metadata-item">${fechaCreacionFormato}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="comunicado-documento-title">
+                        <h2>${tipoTextoCompleto}.</h2>
+                        <p class="comunicado-fecha-destacada">${fechaComunicado}.</p>
+                    </div>
+                    
+                    <div class="comunicado-documento-info">
+                        <div class="comunicado-info-row">
+                            <strong>Para:</strong> <span class="comunicado-highlight">${this.escapeHtml(comunicado.para || 'N/A')}</span>
+                        </div>
+                        <div class="comunicado-info-row">
+                            <strong>De:</strong> ${this.escapeHtml(comunicado.de || `${deptNombre} – Veterinaria San Martin de Porres`)}
+                        </div>
+                        <div class="comunicado-info-row">
+                            <strong>Asunto:</strong> <span class="comunicado-highlight">${this.escapeHtml(comunicado.asunto || 'N/A')}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="comunicado-documento-body">
+                        ${this.formatComunicadoContent(comunicado.contenido)}
+                    </div>
+                    
+                    <div class="comunicado-documento-footer">
+                        <div class="comunicado-firma">
+                            <p><strong>${comunicado.usuarioNombre || 'N/A'}</strong></p>
+                            <p>${deptNombre}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Abrir el modal
+            const modal = document.getElementById('modal-ver-comunicado');
+            if (modal) {
+                modal.style.display = 'flex';
+                
+                // Esperar a que el contenido se renderice y calcular páginas
+                setTimeout(() => {
+                    this.calcularPaginasComunicado();
+                }, 100);
+                
+                // Recalcular al cambiar el tamaño de la ventana
+                window.addEventListener('resize', () => {
+                    this.calcularPaginasComunicado();
+                });
+                
+                // Configurar el botón de exportar
+                const btnExport = document.getElementById('btn-export-comunicado-detalle');
+                if (btnExport) {
+                    btnExport.onclick = () => {
+                        this.exportComunicadoPDF(id);
+                    };
+                }
+                
+                // Configurar el botón de firmas
+                const btnFirmas = document.getElementById('btn-firmas-comunicado');
+                if (btnFirmas) {
+                    btnFirmas.onclick = () => {
+                        this.mostrarFirmasComunicado(id);
+                    };
+                }
+            }
+        } catch (error) {
+            console.error('Error al mostrar comunicado:', error);
+            showNotification('Error al cargar el comunicado', 'error');
+        }
+    }
+
+    /**
+     * Calculate number of pages for comunicado based on A4 size
+     */
+    calcularPaginasComunicado() {
+        const wrapper = document.querySelector('.comunicado-documento-wrapper');
+        if (!wrapper) return;
+        
+        // Obtener dimensiones del wrapper
+        const wrapperWidth = wrapper.offsetWidth || wrapper.scrollWidth || 800;
+        const contentHeight = wrapper.scrollHeight;
+        
+        // Tamaño A4 en milímetros
+        const A4_WIDTH_MM = 210;
+        const A4_HEIGHT_MM = 297;
+        
+        // El wrapper tiene max-width: 800px en CSS, que corresponde a 210mm en A4
+        // Calcular factor de escala basado en el ancho real
+        const wrapperWidthMM = 210; // El wrapper está diseñado para 210mm (A4 width)
+        const scaleFactor = wrapperWidthMM / wrapperWidth;
+        
+        // Altura del contenido en milímetros
+        const contentHeightMM = contentHeight * scaleFactor;
+        
+        // Altura usable por página (considerando márgenes de 10mm arriba y abajo = 20mm total)
+        const marginMM = 20;
+        const usableHeightMM = A4_HEIGHT_MM - marginMM; // 277mm por página
+        
+        // Calcular número de páginas
+        const totalPages = Math.max(1, Math.ceil(contentHeightMM / usableHeightMM));
+        
+        // Actualizar el contador de páginas
+        const paginaElement = document.getElementById('comunicado-pagina-actual');
+        if (paginaElement) {
+            paginaElement.textContent = `1 de ${totalPages}`;
+        }
+        
+        // Guardar el total de páginas para uso en PDF
+        wrapper.dataset.totalPages = totalPages;
+        
+        return totalPages;
+    }
+
+    /**
+     * Generate random 4-character code (letters, numbers, symbols)
+     */
+    generarCodigoPersonal() {
+        const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*';
+        let codigo = '';
+        for (let i = 0; i < 4; i++) {
+            codigo += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
+        }
+        return codigo;
+    }
+
+    /**
+     * Check if code is unique
+     */
+    async verificarCodigoUnico(codigo) {
+        const usuarios = await db.getAll('usuarios');
+        return !usuarios.some(u => u.codigoPersonal && u.codigoPersonal === codigo);
+    }
+
+    /**
+     * Generate unique code
+     */
+    async generarCodigoUnico() {
+        let codigo;
+        let intentos = 0;
+        do {
+            codigo = this.generarCodigoPersonal();
+            intentos++;
+            if (intentos > 100) {
+                throw new Error('No se pudo generar un código único después de 100 intentos');
+            }
+        } while (!(await this.verificarCodigoUnico(codigo)));
+        return codigo;
+    }
+
+    /**
+     * Show firmas modal for comunicado
+     */
+    async mostrarFirmasComunicado(comunicadoId) {
+        try {
+            const comunicado = await db.get('comunicados', comunicadoId);
+            if (!comunicado) {
+                showNotification('Comunicado no encontrado', 'error');
+                return;
+            }
+
+            // Obtener usuario actual
+            const currentUser = auth.getCurrentUser();
+            const isAdmin = auth.isAdmin();
+
+            // Obtener solo empleados (usuarios con código personal)
+            const usuarios = await db.getAll('usuarios');
+            let empleados;
+            
+            if (isAdmin) {
+                // Admin ve todos los empleados
+                empleados = usuarios.filter(u => u.activo !== false && u.codigoPersonal);
+            } else {
+                // Usuario regular solo ve su propio registro
+                empleados = usuarios.filter(u => u.id === currentUser.id && u.codigoPersonal);
+                
+                if (empleados.length === 0) {
+                    // Si el usuario actual no tiene código personal, mostrar mensaje
+                    const listaContainer = document.getElementById('firmas-comunicado-lista');
+                    if (listaContainer) {
+                        listaContainer.innerHTML = '<p style="padding: 1rem; text-align: center; color: #ef4444;">No tienes un código personal asignado. Contacta al administrador.</p>';
+                    }
+                    
+                    // Ocultar formulario de firmar
+                    const formFirmar = document.getElementById('firmar-comunicado-form');
+                    if (formFirmar) {
+                        formFirmar.style.display = 'none';
+                    }
+                    
+                    // Abrir modal
+                    const modal = document.getElementById('modal-firmas-comunicado');
+                    if (modal) {
+                        modal.style.display = 'flex';
+                    }
+                    return;
+                }
+            }
+
+            // Obtener firmas existentes
+            const firmas = await db.query('firmas_comunicados', 'comunicadoId', comunicadoId);
+            const firmasMap = new Map();
+            firmas.forEach(f => {
+                firmasMap.set(f.usuarioId, f);
+            });
+
+            // Renderizar lista de empleados
+            const listaContainer = document.getElementById('firmas-comunicado-lista');
+            if (!listaContainer) return;
+
+            if (empleados.length === 0) {
+                listaContainer.innerHTML = '<p>No hay empleados registrados. Los empleados deben tener un código personal asignado.</p>';
+                return;
+            }
+
+            // Mostrar u ocultar formulario de firmar según el rol
+            const formFirmar = document.getElementById('firmar-comunicado-form');
+            if (formFirmar) {
+                if (isAdmin) {
+                    formFirmar.style.display = 'none'; // Admin no necesita firmar, solo ver
+                } else {
+                    formFirmar.style.display = 'block'; // Usuario regular puede firmar
+                }
+            }
+
+            listaContainer.innerHTML = `
+                ${isAdmin ? `
+                    <div style="margin-bottom: 1rem;">
+                        <strong>Total de empleados: ${empleados.length}</strong> | 
+                        <strong style="color: #10b981;">Firmados: ${firmasMap.size}</strong> | 
+                        <strong style="color: #ef4444;">Pendientes: ${empleados.length - firmasMap.size}</strong>
+                    </div>
+                ` : `
+                    <div style="margin-bottom: 1rem; text-align: center;">
+                        <strong>Tu estado de firma</strong>
+                    </div>
+                `}
+                <div style="display: grid; gap: 0.75rem;">
+                    ${empleados.map(usuario => {
+                        const firma = firmasMap.get(usuario.id);
+                        const haFirmado = !!firma;
+                        const codigoPersonal = usuario.codigoPersonal || 'No asignado';
+                        
+                        return `
+                            <div class="firma-empleado-item" style="
+                                display: flex; 
+                                align-items: center; 
+                                justify-content: space-between;
+                                padding: 1rem;
+                                border: 1px solid ${haFirmado ? '#10b981' : '#e5e7eb'};
+                                border-radius: 8px;
+                                background: ${haFirmado ? '#f0fdf4' : '#ffffff'};
+                            ">
+                                <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 0.75rem;">
+                                        <span style="
+                                            display: inline-flex;
+                                            align-items: center;
+                                            justify-content: center;
+                                            width: 24px;
+                                            height: 24px;
+                                            border-radius: 50%;
+                                            background: ${haFirmado ? '#10b981' : '#e5e7eb'};
+                                            color: ${haFirmado ? '#ffffff' : '#6b7280'};
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                        ">
+                                            ${haFirmado ? '✓' : ''}
+                                        </span>
+                                        <div>
+                                            <strong>${this.escapeHtml(usuario.nombre)}</strong>
+                                            <div style="font-size: 0.875rem; color: #6b7280;">
+                                                ${this.escapeHtml(usuario.email)}
+                                                ${isAdmin ? ` | Código: <strong>${this.escapeHtml(codigoPersonal)}</strong>` : ''}
+                                            </div>
+                                            ${!isAdmin ? `
+                                                <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem;">
+                                                    Tu código personal: <strong style="font-family: monospace; letter-spacing: 2px;">${this.escapeHtml(codigoPersonal)}</strong>
+                                                </div>
+                                            ` : ''}
+                                            ${firma ? `
+                                                <div style="font-size: 0.75rem; color: #10b981; margin-top: 0.25rem;">
+                                                    Firmado el ${new Date(firma.fecha).toLocaleDateString('es-ES', { 
+                                                        day: '2-digit', 
+                                                        month: '2-digit', 
+                                                        year: 'numeric',
+                                                        hour: '2-digit',
+                                                        minute: '2-digit'
+                                                    })}
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div style="
+                                    padding: 0.5rem 1rem;
+                                    border-radius: 6px;
+                                    font-weight: 600;
+                                    font-size: 0.875rem;
+                                    ${haFirmado ? 'background: #10b981; color: #ffffff;' : 'background: #f3f4f6; color: #6b7280;'}
+                                ">
+                                    ${haFirmado ? 'FIRMADO' : 'PENDIENTE'}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+
+            // Configurar botón de firmar
+            const btnFirmar = document.getElementById('btn-firmar-comunicado');
+            if (btnFirmar) {
+                btnFirmar.onclick = async () => {
+                    await this.firmarComunicado(comunicadoId);
+                };
+            }
+
+            // Abrir modal
+            const modal = document.getElementById('modal-firmas-comunicado');
+            if (modal) {
+                modal.style.display = 'flex';
+            }
+        } catch (error) {
+            console.error('Error al mostrar firmas:', error);
+            showNotification('Error al cargar las firmas', 'error');
+        }
+    }
+
+    /**
+     * Firmar comunicado con código personal
+     */
+    async firmarComunicado(comunicadoId) {
+        try {
+            const codigoInput = document.getElementById('codigo-firma-personal');
+            if (!codigoInput) return;
+
+            let codigoIngresado = codigoInput.value.trim();
+            if (!codigoIngresado) {
+                showNotification('Por favor ingrese su código personal', 'error');
+                return;
+            }
+
+            // Normalizar a mayúsculas para comparación
+            codigoIngresado = codigoIngresado.toUpperCase();
+
+            // Buscar usuario por código personal (comparación case-insensitive)
+            const usuarios = await db.getAll('usuarios');
+            
+            const usuario = usuarios.find(u => {
+                if (!u.codigoPersonal) return false;
+                // Comparar normalizando ambos a mayúsculas
+                const codigoBD = u.codigoPersonal.toUpperCase();
+                return codigoBD === codigoIngresado;
+            });
+
+            if (!usuario) {
+                showNotification('Código personal no válido', 'error');
+                return;
+            }
+
+            // Verificar si ya firmó
+            const firmasExistentes = await db.query('firmas_comunicados', 'comunicadoId', comunicadoId);
+            const yaFirmo = firmasExistentes.some(f => f.usuarioId === usuario.id);
+
+            if (yaFirmo) {
+                showNotification('Ya has firmado este comunicado', 'info');
+                return;
+            }
+
+            // Crear firma
+            const firma = {
+                comunicadoId,
+                usuarioId: usuario.id,
+                usuarioNombre: usuario.nombre,
+                codigoPersonal: codigoIngresado, // Usar codigoIngresado que ya está normalizado
+                fecha: new Date().toISOString(),
+                fechaTimestamp: Date.now()
+            };
+
+            await db.add('firmas_comunicados', firma);
+            await db.addAuditoria('COMUNICADO_FIRMA', { 
+                comunicadoId, 
+                usuarioId: usuario.id,
+                codigoPersonal: codigoIngresado
+            });
+
+            showNotification(`Firmado exitosamente como ${usuario.nombre}`, 'success');
+            
+            // Limpiar input
+            codigoInput.value = '';
+
+            // Recargar lista de firmas
+            await this.mostrarFirmasComunicado(comunicadoId);
+        } catch (error) {
+            console.error('Error al firmar:', error);
+            if (error.message && error.message.includes('unique')) {
+                showNotification('Ya has firmado este comunicado', 'error');
+            } else {
+                showNotification('Error al firmar el comunicado', 'error');
+            }
+        }
+    }
+
+    /**
+     * Format comunicado content with paragraphs
+     */
+    formatComunicadoContent(content) {
+        if (!content) return '';
+        
+        // Dividir por saltos de línea y crear párrafos
+        const paragraphs = content.split('\n').filter(p => p.trim());
+        return paragraphs.map(p => {
+            const trimmed = p.trim();
+            // Si el párrafo parece ser un título (todo mayúsculas o empieza con números)
+            if (trimmed.match(/^[A-ZÁÉÍÓÚÑ\s]+$/) || trimmed.match(/^ARTICULO|^ARTÍCULO/)) {
+                return `<p class="comunicado-paragraph-title">${this.escapeHtml(trimmed)}</p>`;
+            }
+            // Si empieza con letra seguida de punto y paréntesis (lista)
+            if (trimmed.match(/^[a-z]\)\./)) {
+                return `<p class="comunicado-paragraph">${this.escapeHtml(trimmed)}</p>`;
+            }
+            return `<p class="comunicado-paragraph">${this.escapeHtml(trimmed)}</p>`;
+        }).join('');
     }
 
     /**
@@ -661,6 +1168,258 @@ class App {
     async loadAdminPanel() {
         await this.loadAdminStats();
         await this.loadAdminSolicitudes();
+        await this.loadEmpleados();
+        this.setupAdminTabs();
+        this.setupEmpleadoForm();
+    }
+
+    /**
+     * Setup admin tabs
+     */
+    setupAdminTabs() {
+        const tabs = document.querySelectorAll('.admin-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.getAttribute('data-tab');
+                
+                // Remove active class from all tabs
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Hide all tab contents
+                document.querySelectorAll('.admin-tab-content').forEach(content => {
+                    content.style.display = 'none';
+                });
+                
+                // Show selected tab content
+                const content = document.getElementById(`admin-tab-${tabName}`);
+                if (content) {
+                    content.style.display = 'block';
+                    
+                    if (tabName === 'empleados') {
+                        this.loadEmpleados();
+                    }
+                }
+            });
+        });
+    }
+
+    /**
+     * Setup empleado form
+     */
+    async setupEmpleadoForm() {
+        const btnNuevoEmpleado = document.getElementById('btn-nuevo-empleado');
+        if (btnNuevoEmpleado) {
+            btnNuevoEmpleado.addEventListener('click', () => {
+                this.abrirModalEmpleado();
+            });
+        }
+
+        const btnGenerarCodigo = document.getElementById('btn-generar-codigo');
+        if (btnGenerarCodigo) {
+            btnGenerarCodigo.addEventListener('click', async () => {
+                const codigoInput = document.getElementById('empleado-codigo-personal');
+                if (codigoInput) {
+                    try {
+                        const codigo = await this.generarCodigoUnico();
+                        codigoInput.value = codigo;
+                    } catch (error) {
+                        showNotification('Error al generar código', 'error');
+                    }
+                }
+            });
+        }
+
+        const formEmpleado = document.getElementById('form-empleado');
+        if (formEmpleado) {
+            formEmpleado.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await this.crearEmpleado();
+            });
+        }
+    }
+
+    /**
+     * Open empleado modal
+     */
+    async abrirModalEmpleado() {
+        const modal = document.getElementById('modal-nuevo-empleado');
+        if (!modal) return;
+
+        // Load departments
+        const deptSelect = document.getElementById('empleado-departamento');
+        if (deptSelect) {
+            const departamentos = await db.getAll('departamentos');
+            deptSelect.innerHTML = '<option value="">Seleccione...</option>' +
+                departamentos.map(d => `<option value="${d.codigo}">${d.nombre}</option>`).join('');
+        }
+
+        // Generate code automatically
+        const codigoInput = document.getElementById('empleado-codigo-personal');
+        if (codigoInput) {
+            try {
+                const codigo = await this.generarCodigoUnico();
+                codigoInput.value = codigo;
+            } catch (error) {
+                showNotification('Error al generar código', 'error');
+            }
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    /**
+     * Create empleado
+     */
+    async crearEmpleado() {
+        try {
+            const nombre = document.getElementById('empleado-nombre').value.trim();
+            const email = document.getElementById('empleado-email').value.trim();
+            const departamento = document.getElementById('empleado-departamento').value;
+            const codigoPersonal = document.getElementById('empleado-codigo-personal').value.trim();
+
+            if (!nombre || !email || !departamento || !codigoPersonal) {
+                showNotification('Por favor complete todos los campos', 'error');
+                return;
+            }
+
+            // Verificar que el email no exista (case-insensitive)
+            const usuarios = await db.getAll('usuarios');
+            const emailExiste = usuarios.some(u => u.email && u.email.toLowerCase() === email.toLowerCase());
+            if (emailExiste) {
+                showNotification('El email ya está registrado. Por favor use otro email.', 'error');
+                return;
+            }
+
+            // Verificar que el código sea único
+            const codigoExiste = usuarios.some(u => u.codigoPersonal && u.codigoPersonal === codigoPersonal);
+            if (codigoExiste) {
+                showNotification('El código personal ya está en uso. Por favor genere uno nuevo.', 'error');
+                // Regenerar código automáticamente
+                try {
+                    const nuevoCodigo = await this.generarCodigoUnico();
+                    document.getElementById('empleado-codigo-personal').value = nuevoCodigo;
+                } catch (error) {
+                    console.error('Error al regenerar código:', error);
+                }
+                return;
+            }
+
+            // Crear usuario/empleado
+            const password = await auth.encryptPassword('temp123'); // Contraseña temporal
+            const empleado = {
+                email,
+                password,
+                nombre,
+                departamento,
+                codigoPersonal,
+                rol: 'usuario',
+                fechaRegistro: new Date().toISOString(),
+                activo: true
+            };
+
+            try {
+                await db.add('usuarios', empleado);
+                await db.addAuditoria('EMPLEADO_CREATE', { email, nombre, codigoPersonal });
+
+                showNotification(`Empleado ${nombre} creado exitosamente. Código: ${codigoPersonal}`, 'success');
+            } catch (dbError) {
+                if (dbError.name === 'ConstraintError' || dbError.message.includes('uniqueness')) {
+                    showNotification('El email ya está registrado en la base de datos. Por favor use otro email.', 'error');
+                    return;
+                }
+                throw dbError;
+            }
+            
+            // Cerrar modal y limpiar form
+            const modal = document.getElementById('modal-nuevo-empleado');
+            if (modal) modal.style.display = 'none';
+            document.getElementById('form-empleado').reset();
+
+            // Recargar lista
+            await this.loadEmpleados();
+        } catch (error) {
+            console.error('Error al crear empleado:', error);
+            showNotification('Error al crear el empleado', 'error');
+        }
+    }
+
+    /**
+     * Load empleados list
+     */
+    async loadEmpleados() {
+        const listaContainer = document.getElementById('empleados-list');
+        if (!listaContainer) return;
+
+        const usuarios = await db.getAll('usuarios');
+        const empleados = usuarios.filter(u => u.codigoPersonal); // Solo empleados con código
+
+        if (empleados.length === 0) {
+            listaContainer.innerHTML = `
+                <div class="empty-state">
+                    <span class="empty-state-icon">👥</span>
+                    <h3>No hay empleados registrados</h3>
+                    <p>Agrega empleados para que puedan firmar comunicados.</p>
+                    <button class="btn btn-primary" onclick="document.getElementById('btn-nuevo-empleado').click()">
+                        Agregar Primer Empleado
+                    </button>
+                </div>
+            `;
+            return;
+        }
+
+        // Obtener departamentos para mostrar nombres
+        const departamentos = await db.getAll('departamentos');
+        const deptMap = new Map(departamentos.map(d => [d.codigo, d.nombre]));
+
+        listaContainer.innerHTML = `
+            <div style="display: grid; gap: 1rem;">
+                ${empleados.map(empleado => {
+                    const deptNombre = deptMap.get(empleado.departamento) || empleado.departamento;
+                    return `
+                        <div class="empleado-card" style="
+                            padding: 1.5rem;
+                            border: 1px solid var(--border-color);
+                            border-radius: 8px;
+                            background: #ffffff;
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                        ">
+                            <div style="flex: 1;">
+                                <h4 style="margin: 0 0 0.5rem 0;">${this.escapeHtml(empleado.nombre)}</h4>
+                                <div style="font-size: 0.875rem; color: #6b7280;">
+                                    <div>📧 ${this.escapeHtml(empleado.email)}</div>
+                                    <div>🏢 ${this.escapeHtml(deptNombre)}</div>
+                                    <div style="margin-top: 0.5rem;">
+                                        <strong>Código Personal:</strong> 
+                                        <span style="
+                                            display: inline-block;
+                                            padding: 0.25rem 0.75rem;
+                                            background: #f3f4f6;
+                                            border-radius: 4px;
+                                            font-family: monospace;
+                                            font-weight: 600;
+                                            letter-spacing: 2px;
+                                            color: #1f2937;
+                                        ">${this.escapeHtml(empleado.codigoPersonal)}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="
+                                padding: 0.5rem 1rem;
+                                border-radius: 6px;
+                                font-weight: 600;
+                                font-size: 0.875rem;
+                                ${empleado.activo ? 'background: #10b981; color: #ffffff;' : 'background: #ef4444; color: #ffffff;'}
+                            ">
+                                ${empleado.activo ? 'ACTIVO' : 'INACTIVO'}
+                            </div>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
     }
 
     /**
@@ -1215,9 +1974,28 @@ App.prototype.exportComunicadoPDF = async function(id) {
             return;
         }
         
+        // Si el modal no está abierto, abrirlo primero para renderizar el documento
+        const modal = document.getElementById('modal-ver-comunicado');
+        const documentoElement = document.getElementById('comunicado-documento');
+        const wasModalOpen = modal && modal.style.display === 'flex' && documentoElement && documentoElement.innerHTML.trim();
+        
+        if (!wasModalOpen) {
+            // Abrir el modal para renderizar el documento
+            await this.showComunicadoDetalle(id);
+            // Esperar a que se renderice completamente
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
         showNotification('Generando PDF...', 'info');
         await this.exportSystem.exportComunicadoPDF(comunicado);
         showNotification('Comunicado exportado a PDF exitosamente', 'success');
+        
+        // Si el modal no estaba abierto antes, cerrarlo después de un momento
+        if (!wasModalOpen && modal) {
+            setTimeout(() => {
+                modal.style.display = 'none';
+            }, 1500);
+        }
     } catch (error) {
         console.error('Error al exportar comunicado:', error);
         showNotification('Error al exportar el comunicado a PDF', 'error');
@@ -1339,6 +2117,14 @@ App.prototype.exportSolicitudesExcel = async function() {
     
     await this.exportSystem.exportSolicitudesExcel(solicitudes);
     showNotification('Solicitudes exportadas a Excel', 'success');
+};
+
+// Agregar método escapeHtml al prototipo de App
+App.prototype.escapeHtml = function(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 };
 
 export default App;

@@ -21,9 +21,14 @@ class ExportSystem {
      */
     async loadScripts() {
         // Load jsPDF
-        if (!window.jsPDF) {
+        if (!window.jsPDF && !window.jspdf) {
             await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
             this.jsPDFLoaded = true;
+        }
+
+        // Load html2canvas if not already loaded
+        if (!window.html2canvas) {
+            await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
         }
 
         // Load SheetJS (xlsx)
@@ -44,13 +49,16 @@ class ExportSystem {
     }
 
     /**
-     * Export comunicado to PDF
+     * Export comunicado to PDF using html2canvas (like Panel_Básico.html)
      */
     async exportComunicadoPDF(comunicado) {
-        // Ensure jsPDF is loaded
+        // Ensure libraries are loaded
+        if (!window.html2canvas) {
+            await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+        }
+        
         if (!window.jspdf && !window.jsPDF) {
-            await this.init();
-            // Wait a bit for script to fully load
+            await this.loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
             await new Promise(resolve => setTimeout(resolve, 500));
         }
 
@@ -62,79 +70,283 @@ class ExportSystem {
         } else {
             throw new Error('jsPDF no se pudo cargar correctamente');
         }
-        const doc = new jsPDF();
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const margin = 20;
-        const maxWidth = pageWidth - (margin * 2);
-        let yPos = margin;
 
-        // Header with gradient effect (simulated)
-        doc.setFillColor(99, 102, 241);
-        doc.rect(0, 0, pageWidth, 50, 'F');
+        // Obtener el elemento del documento que ya está renderizado
+        let documentoElement = document.getElementById('comunicado-documento');
         
-        doc.setTextColor(255, 255, 255);
-        doc.setFontSize(20);
-        doc.setFont('helvetica', 'bold');
-        doc.text('Sistema Administrativo', margin, 30);
-        
-        doc.setFontSize(12);
-        doc.setFont('helvetica', 'normal');
-        doc.text('Comunicado Digital', margin, 40);
-
-        yPos = 60;
-
-        // Content area
-        doc.setTextColor(0, 0, 0);
-        doc.setFillColor(248, 249, 252);
-        doc.rect(margin, yPos, maxWidth, doc.internal.pageSize.getHeight() - yPos - 20, 'F');
-
-        // Code and type
-        doc.setFontSize(10);
-        doc.setTextColor(99, 102, 241);
-        doc.setFont('courier', 'bold');
-        doc.text(`Código: ${comunicado.codigo}`, margin, yPos + 10);
-        
-        doc.setTextColor(100, 100, 100);
-        doc.setFont('helvetica', 'normal');
-        doc.text(`Tipo: ${comunicado.tipo.toUpperCase()} | Departamento: ${comunicado.departamento}`, margin, yPos + 16);
-
-        yPos += 25;
-
-        // Title
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(16);
-        doc.setFont('helvetica', 'bold');
-        const titleLines = doc.splitTextToSize(comunicado.titulo, maxWidth);
-        doc.text(titleLines, margin, yPos);
-        yPos += (titleLines.length * 7) + 10;
-
-        // Divider
-        doc.setDrawColor(200, 200, 200);
-        doc.line(margin, yPos, pageWidth - margin, yPos);
-        yPos += 10;
-
-        // Content
-        doc.setFontSize(11);
-        doc.setFont('helvetica', 'normal');
-        const contentLines = doc.splitTextToSize(comunicado.contenido, maxWidth);
-        
-        contentLines.forEach(line => {
-            if (yPos > doc.internal.pageSize.getHeight() - 30) {
-                doc.addPage();
-                yPos = margin;
+        // Si no está visible o no existe, necesitamos renderizarlo primero
+        if (!documentoElement || !documentoElement.innerHTML.trim()) {
+            const app = window.app;
+            if (app && app.showComunicadoDetalle) {
+                await app.showComunicadoDetalle(comunicado.id);
+                // Esperar a que se renderice
+                await new Promise(resolve => setTimeout(resolve, 800));
+                documentoElement = document.getElementById('comunicado-documento');
             }
-            doc.text(line, margin, yPos);
-            yPos += 6;
-        });
+        }
 
-        // Footer
-        const footerY = doc.internal.pageSize.getHeight() - 10;
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.text(`Generado el ${new Date().toLocaleDateString('es-ES')} - Sistema Administrativo`, margin, footerY);
+        if (!documentoElement || !documentoElement.innerHTML.trim()) {
+            throw new Error('No se pudo encontrar o renderizar el elemento del documento');
+        }
 
-        // Save
-        doc.save(`Comunicado-${comunicado.codigo}.pdf`);
+        // Asegurar que el modal esté visible
+        const modal = document.getElementById('modal-ver-comunicado');
+        if (modal) {
+            modal.style.display = 'flex';
+            // Esperar un momento para que se renderice completamente
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+
+        const documentoWrapper = documentoElement.querySelector('.comunicado-documento-wrapper');
+        if (!documentoWrapper) {
+            throw new Error('No se encontró el wrapper del documento');
+        }
+
+        // Separar header y contenido
+        const headerElement = documentoWrapper.querySelector('.comunicado-documento-header');
+        const titleElement = documentoWrapper.querySelector('.comunicado-documento-title');
+        const infoElement = documentoWrapper.querySelector('.comunicado-documento-info');
+        const bodyElement = documentoWrapper.querySelector('.comunicado-documento-body');
+        const footerElement = documentoWrapper.querySelector('.comunicado-documento-footer');
+
+        // Mostrar indicador de carga
+        const loadingIndicator = document.getElementById('loadingPdf');
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'flex';
+        }
+
+        try {
+            // Esperar a que todas las imágenes se carguen
+            const allImages = documentoWrapper.getElementsByTagName('img');
+            const loadImages = Array.from(allImages).map(img => {
+                return new Promise((resolve) => {
+                    if (img.complete) {
+                        resolve();
+                    } else {
+                        img.onload = resolve;
+                        img.onerror = resolve; // Continuar aunque falle una imagen
+                    }
+                });
+            });
+            await Promise.all(loadImages);
+
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 10; // Margen de 10mm
+            const usableWidth = pageWidth - (margin * 2);
+            const usableHeight = pageHeight - (margin * 2);
+
+            // Capturar header (incluyendo título e info)
+            const headerContainer = document.createElement('div');
+            headerContainer.style.width = `${documentoWrapper.offsetWidth}px`;
+            headerContainer.style.background = '#ffffff';
+            headerContainer.style.padding = '0';
+            if (headerElement) headerContainer.appendChild(headerElement.cloneNode(true));
+            if (titleElement) headerContainer.appendChild(titleElement.cloneNode(true));
+            if (infoElement) headerContainer.appendChild(infoElement.cloneNode(true));
+            headerContainer.style.position = 'absolute';
+            headerContainer.style.left = '-9999px';
+            document.body.appendChild(headerContainer);
+
+            const headerCanvas = await html2canvas(headerContainer, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                allowTaint: true,
+                backgroundColor: '#ffffff',
+                width: headerContainer.scrollWidth,
+                height: headerContainer.scrollHeight
+            });
+            const headerImgData = headerCanvas.toDataURL('image/jpeg', 1.0);
+            const headerHeightMM = (headerCanvas.height * usableWidth) / headerCanvas.width;
+            document.body.removeChild(headerContainer);
+
+            // Capturar contenido del cuerpo
+            const bodyContainer = document.createElement('div');
+            bodyContainer.style.width = `${documentoWrapper.offsetWidth}px`;
+            bodyContainer.style.background = '#ffffff';
+            bodyContainer.style.padding = '0';
+            if (bodyElement) bodyContainer.appendChild(bodyElement.cloneNode(true));
+            bodyContainer.style.position = 'absolute';
+            bodyContainer.style.left = '-9999px';
+            document.body.appendChild(bodyContainer);
+
+            const bodyCanvas = await html2canvas(bodyContainer, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                allowTaint: true,
+                backgroundColor: '#ffffff',
+                width: bodyContainer.scrollWidth,
+                height: bodyContainer.scrollHeight
+            });
+            const bodyImgData = bodyCanvas.toDataURL('image/jpeg', 1.0);
+            const bodyHeightMM = (bodyCanvas.height * usableWidth) / bodyCanvas.width;
+            document.body.removeChild(bodyContainer);
+
+            // Capturar footer
+            let footerImgData = null;
+            let footerHeightMM = 0;
+            if (footerElement) {
+                const footerContainer = document.createElement('div');
+                footerContainer.style.width = `${documentoWrapper.offsetWidth}px`;
+                footerContainer.style.background = '#ffffff';
+                footerContainer.style.padding = '0';
+                footerContainer.appendChild(footerElement.cloneNode(true));
+                footerContainer.style.position = 'absolute';
+                footerContainer.style.left = '-9999px';
+                document.body.appendChild(footerContainer);
+
+                const footerCanvas = await html2canvas(footerContainer, {
+                    scale: 2,
+                    useCORS: true,
+                    logging: false,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff',
+                    width: footerContainer.scrollWidth,
+                    height: footerContainer.scrollHeight
+                });
+                footerImgData = footerCanvas.toDataURL('image/jpeg', 1.0);
+                footerHeightMM = (footerCanvas.height * usableWidth) / footerCanvas.width;
+                document.body.removeChild(footerContainer);
+            }
+
+            // Calcular altura disponible para contenido por página
+            const headerSpace = headerHeightMM + 5; // 5mm de espacio después del header
+            const footerSpace = footerHeightMM + 5; // 5mm de espacio antes del footer
+            const contentHeightPerPage = usableHeight - headerSpace - footerSpace;
+
+            // Calcular número total de páginas
+            const totalPages = Math.max(1, Math.ceil(bodyHeightMM / contentHeightPerPage));
+
+            // Generar cada página
+            let bodyYPosition = 0;
+            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                if (pageNum > 1) {
+                    pdf.addPage();
+                }
+
+                let yPos = margin;
+
+                // Agregar header en cada página
+                if (headerElement) {
+                    // Crear header con número de página actualizado
+                    const headerContainerUpdated = document.createElement('div');
+                    headerContainerUpdated.style.width = `${documentoWrapper.offsetWidth}px`;
+                    headerContainerUpdated.style.background = '#ffffff';
+                    headerContainerUpdated.style.padding = '0';
+                    
+                    // Clonar header y actualizar número de página
+                    if (headerElement) {
+                        const headerClone = headerElement.cloneNode(true);
+                        const paginaClone = headerClone.querySelector('#comunicado-pagina-actual');
+                        if (paginaClone) {
+                            paginaClone.textContent = `${pageNum} de ${totalPages}`;
+                        }
+                        headerContainerUpdated.appendChild(headerClone);
+                    }
+                    if (titleElement) headerContainerUpdated.appendChild(titleElement.cloneNode(true));
+                    if (infoElement) headerContainerUpdated.appendChild(infoElement.cloneNode(true));
+                    headerContainerUpdated.style.position = 'absolute';
+                    headerContainerUpdated.style.left = '-9999px';
+                    headerContainerUpdated.style.top = '0';
+                    document.body.appendChild(headerContainerUpdated);
+
+                    const headerCanvasUpdated = await html2canvas(headerContainerUpdated, {
+                        scale: 2,
+                        useCORS: true,
+                        logging: false,
+                        allowTaint: true,
+                        backgroundColor: '#ffffff',
+                        width: headerContainerUpdated.scrollWidth,
+                        height: headerContainerUpdated.scrollHeight
+                    });
+                    const headerImgDataUpdated = headerCanvasUpdated.toDataURL('image/jpeg', 1.0);
+                    pdf.addImage(headerImgDataUpdated, 'JPEG', margin, yPos, usableWidth, headerHeightMM);
+                    document.body.removeChild(headerContainerUpdated);
+                }
+                yPos += headerHeightMM + 5;
+
+                // Calcular qué parte del contenido mostrar en esta página
+                const contentStart = bodyYPosition;
+                const contentEnd = Math.min(bodyYPosition + contentHeightPerPage, bodyHeightMM);
+                const contentHeightThisPage = contentEnd - contentStart;
+
+                // Agregar contenido del cuerpo (solo la parte correspondiente a esta página)
+                if (contentHeightThisPage > 0) {
+                    // Calcular posición Y en la imagen del cuerpo
+                    const sourceY = (contentStart / bodyHeightMM) * bodyCanvas.height;
+                    const sourceHeight = (contentHeightThisPage / bodyHeightMM) * bodyCanvas.height;
+
+                    // Crear un canvas temporal para la porción del contenido
+                    const contentCanvas = document.createElement('canvas');
+                    contentCanvas.width = bodyCanvas.width;
+                    contentCanvas.height = sourceHeight;
+                    const ctx = contentCanvas.getContext('2d');
+                    ctx.drawImage(bodyCanvas, 0, sourceY, bodyCanvas.width, sourceHeight, 0, 0, bodyCanvas.width, sourceHeight);
+                    const contentImgData = contentCanvas.toDataURL('image/jpeg', 1.0);
+                    const contentHeightMMThisPage = (sourceHeight * usableWidth) / bodyCanvas.width;
+
+                    pdf.addImage(contentImgData, 'JPEG', margin, yPos, usableWidth, contentHeightMMThisPage);
+                    yPos += contentHeightMMThisPage;
+                }
+
+                bodyYPosition = contentEnd;
+
+                // Agregar footer solo en la última página
+                if (pageNum === totalPages && footerImgData) {
+                    yPos += 5;
+                    pdf.addImage(footerImgData, 'JPEG', margin, yPos, usableWidth, footerHeightMM);
+                }
+            }
+
+            // Generar nombre del archivo
+            const codigo = comunicado.codigo || 'sin-codigo';
+            const fileName = `Comunicado-${codigo}.pdf`;
+
+            // Guardar el PDF
+            pdf.save(fileName);
+
+        } catch (error) {
+            console.error('Error al generar el PDF:', error);
+            throw new Error('Error al generar el PDF: ' + error.message);
+        } finally {
+            // Ocultar indicador de carga
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+            
+            // Cerrar el modal si se abrió automáticamente
+            // Solo cerrar si no fue abierto manualmente por el usuario
+            const modal = document.getElementById('modal-ver-comunicado');
+            if (modal && modal.style.display === 'flex') {
+                // Pequeño delay para que el usuario vea que se generó
+                setTimeout(() => {
+                    // No cerrar automáticamente si el usuario lo abrió manualmente
+                    // Solo cerrar si fue abierto por la función de exportación
+                }, 1000);
+            }
+        }
+    }
+
+    /**
+     * Format date in full Spanish format
+     */
+    formatDateFull(dateString) {
+        if (!dateString) return '';
+        
+        const date = new Date(dateString);
+        const months = [
+            'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+            'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'
+        ];
+        
+        const day = date.getDate();
+        const month = months[date.getMonth()];
+        const year = date.getFullYear();
+        
+        return `${day} de ${month} de ${year}`;
     }
 
     /**

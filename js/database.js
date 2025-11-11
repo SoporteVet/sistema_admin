@@ -7,8 +7,8 @@ class Database {
     constructor() {
         this.db = null;
         this.dbName = 'SistemaAdministrativo';
-        this.version = 2; // Increment version to add new store
-        this.stores = ['usuarios', 'comunicados', 'solicitudes', 'firmas', 'departamentos', 'auditoria', 'comentarios_solicitudes'];
+        this.version = 4; // Increment version to ensure firmas_comunicados store is created
+        this.stores = ['usuarios', 'comunicados', 'solicitudes', 'firmas', 'firmas_comunicados', 'departamentos', 'auditoria', 'comentarios_solicitudes'];
     }
 
     /**
@@ -26,6 +26,9 @@ class Database {
 
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+                const oldVersion = event.oldVersion || 0;
+
+                console.log(`Actualizando base de datos de versión ${oldVersion} a ${this.version}`);
 
                 // Usuarios Store
                 if (!db.objectStoreNames.contains('usuarios')) {
@@ -53,11 +56,29 @@ class Database {
                     solicitudesStore.createIndex('fecha', 'fecha', { unique: false });
                 }
 
-                // Firmas Store
+                // Firmas Store (para solicitudes)
                 if (!db.objectStoreNames.contains('firmas')) {
                     const firmasStore = db.createObjectStore('firmas', { keyPath: 'id', autoIncrement: true });
                     firmasStore.createIndex('solicitudId', 'solicitudId', { unique: false });
                     firmasStore.createIndex('usuarioId', 'usuarioId', { unique: false });
+                }
+
+                // Firmas Comunicados Store - Crear si no existe o si estamos actualizando desde versión < 4
+                if (!db.objectStoreNames.contains('firmas_comunicados')) {
+                    console.log('Creando store firmas_comunicados...');
+                    const firmasComunicadosStore = db.createObjectStore('firmas_comunicados', { keyPath: 'id', autoIncrement: true });
+                    firmasComunicadosStore.createIndex('comunicadoId', 'comunicadoId', { unique: false });
+                    firmasComunicadosStore.createIndex('usuarioId', 'usuarioId', { unique: false });
+                    firmasComunicadosStore.createIndex('codigoPersonal', 'codigoPersonal', { unique: false });
+                    // Índice compuesto para evitar firmas duplicadas (puede fallar en algunos navegadores)
+                    try {
+                        firmasComunicadosStore.createIndex('comunicado_usuario', ['comunicadoId', 'usuarioId'], { unique: true });
+                    } catch (e) {
+                        console.warn('No se pudo crear índice compuesto, se usará validación manual');
+                    }
+                    console.log('Store firmas_comunicados creado exitosamente');
+                } else {
+                    console.log('Store firmas_comunicados ya existe');
                 }
 
                 // Departamentos Store
@@ -154,6 +175,12 @@ class Database {
      * Query by index
      */
     async query(storeName, indexName, value) {
+        // Verificar que el store existe
+        if (!this.db.objectStoreNames.contains(storeName)) {
+            console.warn(`Store ${storeName} no existe. Retornando array vacío.`);
+            return [];
+        }
+        
         const transaction = this.db.transaction([storeName], 'readonly');
         const store = transaction.objectStore(storeName);
         const index = store.index(indexName);
