@@ -1,2131 +1,3077 @@
-/**
- * Main Application Controller
- * Orchestrates all modules and handles page navigation
- */
-
-import auth from './auth.js';
-import db from './database.js';
-import formsManager from './forms.js';
-import signatureManager from './signature.js';
-import { showNotification } from './notifications.js';
-import formValidation from './form-validation.js';
-// Dark mode disabled - using light mode only
-import keyboardShortcuts from './keyboard-shortcuts.js';
-import Charts from './charts.js';
-import ExportSystem from './export.js';
-import QuickActions from './quick-actions.js';
-import Reminders from './reminders.js';
-import solicitudesEnhancements from './solicitudes-enhancements.js';
-import SolicitudesTimeline from './solicitudes-timeline.js';
+// ============================================================
+// APP.JS - Controlador Principal (Firebase Edition)
+// Veterinaria San Martín de Porres
+// ============================================================
 
 class App {
-    constructor() {
-        this.currentPage = 'dashboard';
-        this.init();
-    }
+    static currentView = 'dashboard';
+    static isLoading = false;
 
-    /**
-     * Initialize application
-     */
-    async init() {
-        try {
-            // Wait for database to be ready
-            await db.ensureInit();
+    static init() {
+        // Mostrar pantalla de carga mientras Firebase verifica el auth
+        this.showLoading(true);
 
-            // Check authentication
-            if (!auth.isAuthenticated()) {
+        AuthManager.initAuthListener(async (isAuthenticated) => {
+            this.showLoading(false);
+            if (isAuthenticated) {
+                this.showApp();
+            } else {
                 this.showLogin();
-                return;
             }
+        });
+    }
 
-            // Setup authenticated app
+    // ========================================================
+    // LOADING
+    // ========================================================
+    static showLoading(show) {
+        const loader = document.getElementById('loadingScreen');
+        if (loader) {
+            loader.style.display = show ? 'flex' : 'none';
+        }
+    }
+
+    static showContentLoading() {
+        const content = document.getElementById('contentArea');
+        if (content) {
+            content.innerHTML = `
+                <div style="display:flex;align-items:center;justify-content:center;padding:60px;">
+                    <div style="text-align:center;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:2.5rem;color:var(--primary);margin-bottom:16px;"></i>
+                        <p style="color:var(--text-secondary);">Cargando...</p>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    // ========================================================
+    // LOGIN
+    // ========================================================
+    static showLogin() {
+        document.getElementById('loginPage').style.display = 'flex';
+        document.getElementById('appPage').style.display = 'none';
+        document.getElementById('loadingScreen').style.display = 'none';
+    }
+
+    static showApp() {
+        document.getElementById('loginPage').style.display = 'none';
+        document.getElementById('appPage').style.display = 'flex';
+        document.getElementById('loadingScreen').style.display = 'none';
+        this.updateSidebar();
+        this.setupRealtimeNotifications();
+        this.navigate('dashboard');
+    }
+
+    static async handleLogin(e) {
+        e.preventDefault();
+        const email = document.getElementById('loginEmail').value;
+        const password = document.getElementById('loginPassword').value;
+        const errorEl = document.getElementById('loginError');
+        const loginBtn = document.querySelector('.login-btn');
+
+        loginBtn.disabled = true;
+        loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i> Ingresando...';
+
+        const result = await AuthManager.login(email, password);
+
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = '<i class="fas fa-sign-in-alt" style="margin-right:8px;"></i> Iniciar Sesión';
+
+        if (result.success) {
+            errorEl.classList.remove('show');
             this.showApp();
-        } catch (error) {
-            console.error('Error initializing app:', error);
-            this.showLogin();
-        }
-    }
-
-    /**
-     * Show login screen
-     */
-    showLogin() {
-        document.getElementById('login-screen').style.display = 'flex';
-        document.getElementById('app').style.display = 'none';
-        
-        const loginForm = document.getElementById('login-form');
-        
-        // Remove existing listener to prevent duplicates
-        const newForm = loginForm.cloneNode(true);
-        loginForm.parentNode.replaceChild(newForm, loginForm);
-        
-        const freshLoginForm = document.getElementById('login-form');
-        
-        // Setup form validation
-        formValidation.setupFormValidation('login-form');
-        
-        freshLoginForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            // Validate form before submission
-            if (!formValidation.validateForm('login-form')) {
-                showNotification('Por favor complete todos los campos correctamente', 'error');
-                return;
-            }
-            
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
-            const errorDiv = document.getElementById('login-error');
-            const submitBtn = freshLoginForm.querySelector('button[type="submit"]');
-
-            // Show loading state
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="loading-spinner"></span> Iniciando sesión...';
-            submitBtn.classList.add('btn-loading');
-
-            try {
-                const result = await auth.login(email, password);
-                if (result && result.success) {
-                    errorDiv.textContent = '';
-                    await this.showApp();
-                }
-            } catch (error) {
-                errorDiv.textContent = error.message || 'Error al iniciar sesión';
-                showNotification(error.message || 'Error al iniciar sesión', 'error');
-                console.error('Login error:', error);
-            } finally {
-                // Reset button
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = 'Iniciar Sesión';
-                submitBtn.classList.remove('btn-loading');
-            }
-        });
-    }
-
-    /**
-     * Show main application
-     */
-    async showApp() {
-        // Wait a bit to ensure auth state is updated
-        await new Promise(resolve => setTimeout(resolve, 50));
-        
-        // Double check authentication
-        const token = localStorage.getItem('auth_token');
-        const user = localStorage.getItem('user');
-        
-        if (!token || !user) {
-            console.error('Not authenticated after login - missing token or user');
-            this.showLogin();
-            return;
-        }
-
-        if (!auth.isAuthenticated()) {
-            console.error('Not authenticated after login - token invalid');
-            // Clear invalid tokens
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('user');
-            this.showLogin();
-            return;
-        }
-
-        document.getElementById('login-screen').style.display = 'none';
-        document.getElementById('app').style.display = 'block';
-        
-        this.setupApp();
-        this.loadCurrentUser();
-        this.setupEventListeners();
-        await this.loadDashboard();
-        
-        // Navigate to dashboard
-        this.navigateTo('dashboard');
-    }
-
-    /**
-     * Setup authenticated application
-     */
-    setupApp() {
-        // Show/hide admin link based on role
-        const adminLink = document.getElementById('admin-link');
-        if (auth.isAdmin()) {
-            adminLink.style.display = 'block';
+            Toast.success('Bienvenido', `Hola, ${result.user.nombre}!`);
         } else {
-            adminLink.style.display = 'none';
+            errorEl.textContent = result.message;
+            errorEl.classList.add('show');
         }
-        
-        // Dark mode disabled - using light mode only
-        // Remove dark mode class if present
-        document.documentElement.classList.remove('dark-mode');
-        // Clear dark mode preference from localStorage
-        localStorage.removeItem('darkMode');
-        
-        // Initialize charts
-        this.charts = new Charts();
-        
-        // Initialize export system
-        this.exportSystem = new ExportSystem();
-        this.exportSystem.init();
-        
-        // Initialize quick actions
-        this.quickActions = new QuickActions();
-        
-        // Initialize reminders
-        this.reminders = new Reminders();
-        
-        // Initialize solicitudes enhancements
-        this.solicitudesTimeline = new SolicitudesTimeline();
-        this.currentSolicitudesView = 'list';
-    }
-    
-    /**
-     * Check if user is admin
-     */
-    isAdmin() {
-        return auth.isAdmin();
     }
 
-    /**
-     * Load current user info
-     */
-    loadCurrentUser() {
-        const user = auth.getCurrentUser();
-        if (user) {
-            const userNameEl = document.getElementById('user-name');
-            if (userNameEl) {
-                userNameEl.textContent = user.nombre || user.email;
+    static async handleLogout() {
+        NotificationManager.stopListening();
+        await AuthManager.logout();
+        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginPassword').value = '';
+        this.showLogin();
+    }
+
+    static demoLogin(email, password) {
+        document.getElementById('loginEmail').value = email;
+        document.getElementById('loginPassword').value = password;
+    }
+
+    // ========================================================
+    // REALTIME NOTIFICATIONS LISTENER
+    // ========================================================
+    static setupRealtimeNotifications() {
+        const user = AuthManager.getUser();
+        if (!user) return;
+
+        NotificationManager.listenForUser(user.id, (notifications, unreadCount) => {
+            // Actualizar badge de notificaciones en tiempo real
+            const badge = document.getElementById('notifCount');
+            if (badge) {
+                badge.textContent = unreadCount > 0 ? unreadCount : '';
+                badge.dataset.count = unreadCount;
             }
-        }
+            const sidebarBadge = document.getElementById('navNotifBadge');
+            if (sidebarBadge) {
+                sidebarBadge.textContent = unreadCount > 0 ? unreadCount : '';
+                sidebarBadge.style.display = unreadCount > 0 ? 'inline' : 'none';
+            }
+        });
     }
 
-    /**
-     * Setup event listeners
-     */
-    setupEventListeners() {
-        // Navigation
-        document.querySelectorAll('.nav-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                e.preventDefault();
-                const page = item.dataset.page;
-                if (page) {
-                    this.navigateTo(page);
-                }
-            });
-        });
-
-        // Logout
-        const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', () => {
-                auth.logout();
-            });
-        }
-
-        // Menu toggle (mobile)
-        const menuToggle = document.getElementById('menu-toggle');
-        if (menuToggle) {
-            menuToggle.addEventListener('click', () => {
-                document.getElementById('sidebar').classList.toggle('active');
-            });
-        }
-
-        // Search and filters
-        const searchComunicados = document.getElementById('search-comunicados');
-        if (searchComunicados) {
-            searchComunicados.addEventListener('input', () => this.loadComunicados());
-        }
-
-        document.getElementById('filter-departamento')?.addEventListener('change', () => this.loadComunicados());
-        document.getElementById('filter-tipo')?.addEventListener('change', () => this.loadComunicados());
-
-        // Admin filters
-        document.getElementById('admin-filter-departamento')?.addEventListener('change', () => this.loadAdminSolicitudes());
-        document.getElementById('admin-filter-tipo')?.addEventListener('change', () => this.loadAdminSolicitudes());
-        document.getElementById('admin-filter-fecha-inicio')?.addEventListener('change', () => this.loadAdminSolicitudes());
-        document.getElementById('admin-filter-fecha-fin')?.addEventListener('change', () => this.loadAdminSolicitudes());
-        document.getElementById('admin-search-empleado')?.addEventListener('input', () => this.loadAdminSolicitudes());
-    }
-
-    /**
-     * Navigate to page
-     */
-    navigateTo(page) {
-        // Hide all pages
-        document.querySelectorAll('.page').forEach(p => {
-            p.style.display = 'none';
-        });
-
-        // Show selected page
-        const pageEl = document.getElementById(`page-${page}`);
-        if (pageEl) {
-            pageEl.style.display = 'block';
-            this.currentPage = page;
-        }
+    // ========================================================
+    // NAVIGATION
+    // ========================================================
+    static navigate(view, params = {}) {
+        this.currentView = view;
+        this.updateActiveNav(view);
+        this.updatePageTitle(view);
 
         // Close sidebar on mobile
-        const sidebar = document.getElementById('sidebar');
-        if (window.innerWidth <= 768) {
-            sidebar.classList.remove('active');
-        }
+        document.querySelector('.sidebar')?.classList.remove('open');
 
-        // Load page data
-        if (page === 'dashboard') {
-            this.loadDashboard();
-        } else if (page === 'comunicados') {
-            this.loadComunicados();
-        } else if (page === 'solicitudes') {
-            this.loadSolicitudes();
-            // Setup filter listeners
-            setTimeout(() => {
-                const filterEstado = document.getElementById('solicitudes-filter-estado');
-                const filterTipo = document.getElementById('solicitudes-filter-tipo');
-                const filterFechaInicio = document.getElementById('solicitudes-filter-fecha-inicio');
-                const filterFechaFin = document.getElementById('solicitudes-filter-fecha-fin');
+        // Show loading then render
+        this.showContentLoading();
+        this.renderView(view, params);
+    }
 
-                [filterEstado, filterTipo, filterFechaInicio, filterFechaFin].forEach(filter => {
-                    if (filter) {
-                        filter.addEventListener('change', () => this.loadSolicitudes());
-                    }
-                });
-            }, 100);
-        } else if (page === 'admin-panel') {
-            this.loadAdminPanel();
+    static async renderView(view, params) {
+        const contentArea = document.getElementById('contentArea');
+
+        try {
+            switch (view) {
+                case 'dashboard': await this.renderDashboard(); break;
+                case 'crear-documento': await this.renderCrearDocumento(); break;
+                case 'documentos': await this.renderDocumentos(); break;
+                case 'ver-documento': await this.renderVerDocumento(params.id); break;
+                case 'solicitudes': await this.renderSolicitudes(); break;
+                case 'nueva-solicitud': this.renderNuevaSolicitud(); break;
+                case 'gestionar-solicitudes': await this.renderGestionarSolicitudes(); break;
+                case 'estado-firmas': await this.renderEstadoFirmas(params.id); break;
+                case 'usuarios': await this.renderUsuarios(); break;
+                case 'departamentos': await this.renderDepartamentos(); break;
+                default: await this.renderDashboard();
+            }
+            contentArea.className = 'content-area fade-in';
+        } catch (error) {
+            console.error('Error renderizando vista:', error);
+            contentArea.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i>
+                    <h3>Error al cargar</h3>
+                    <p>${error.message}</p>
+                    <button class="btn btn-primary" onclick="App.navigate('dashboard')">Ir al Dashboard</button>
+                </div>
+            `;
         }
     }
 
-    /**
-     * Load dashboard
-     */
-    async loadDashboard() {
-        const user = auth.getCurrentUser();
-        const statsGrid = document.getElementById('stats-grid');
+    static updateActiveNav(view) {
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.view === view);
+        });
+    }
 
-        // Show loading state
-        statsGrid.innerHTML = `
-            <div class="skeleton-stat-card skeleton"></div>
-            <div class="skeleton-stat-card skeleton"></div>
-            <div class="skeleton-stat-card skeleton"></div>
-            <div class="skeleton-stat-card skeleton"></div>
+    static updatePageTitle(view) {
+        const titles = {
+            'dashboard': { title: 'Dashboard', desc: 'Panel de control general' },
+            'crear-documento': { title: 'Crear Documento', desc: 'Nuevo comunicado oficial' },
+            'documentos': { title: 'Documentos', desc: 'Gestión de documentos por departamento' },
+            'ver-documento': { title: 'Ver Documento', desc: 'Detalle del documento' },
+            'solicitudes': { title: 'Mis Solicitudes', desc: 'Vacaciones y permisos' },
+            'nueva-solicitud': { title: 'Nueva Solicitud', desc: 'Solicitar vacaciones o permisos' },
+            'gestionar-solicitudes': { title: 'Gestionar Solicitudes', desc: 'Aprobar o rechazar solicitudes' },
+            'estado-firmas': { title: 'Estado de Firmas', desc: 'Ver quién ha firmado y quién no' },
+            'usuarios': { title: 'Usuarios', desc: 'Administración de usuarios' },
+            'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' }
+        };
+        const info = titles[view] || titles['dashboard'];
+        document.getElementById('pageTitle').textContent = info.title;
+        document.getElementById('pageDesc').textContent = info.desc;
+    }
+
+    // ========================================================
+    // SIDEBAR
+    // ========================================================
+    static updateSidebar() {
+        const user = AuthManager.getUser();
+        if (!user) return;
+
+        const initials = (user.nombre[0] + user.apellido[0]).toUpperCase();
+        document.getElementById('sidebarUserAvatar').textContent = initials;
+        document.getElementById('sidebarUserName').textContent = user.nombre + ' ' + user.apellido;
+        document.getElementById('sidebarUserRole').textContent = ROLES[user.rol]?.nombre || user.rol;
+
+        document.querySelectorAll('.nav-item[data-role]').forEach(item => {
+            const roles = item.dataset.role.split(',');
+            const show = roles.includes(user.rol) || roles.includes('all') || user.rol === 'admin';
+            item.style.display = show ? 'flex' : 'none';
+        });
+    }
+
+    static toggleSidebar() {
+        document.querySelector('.sidebar').classList.toggle('open');
+    }
+
+    // ========================================================
+    // DASHBOARD
+    // ========================================================
+    static async renderDashboard() {
+        const user = AuthManager.getUser();
+        const [docStats, reqStats, myDocs, pendingReqs] = await Promise.all([
+            DocumentManager.getStats(),
+            RequestManager.getStats(),
+            DocumentManager.getByDepartment(user.departamento),
+            AuthManager.isEncargado()
+                ? RequestManager.getPendingByDepartment(user.departamento)
+                : RequestManager.getByUser(user.id).then(reqs => reqs.filter(r => r.estado === 'pendiente'))
+        ]);
+
+        const content = document.getElementById('contentArea');
+        content.innerHTML = `
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: var(--gradient-primary);"><i class="fas fa-file-alt"></i></div>
+                    <div class="stat-info">
+                        <h3>${docStats.total}</h3>
+                        <p>Documentos Totales</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: var(--gradient-secondary);"><i class="fas fa-building"></i></div>
+                    <div class="stat-info">
+                        <h3>${myDocs.filter(d => d.estado === 'activo').length}</h3>
+                        <p>Docs. Mi Departamento</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: var(--gradient-accent);"><i class="fas fa-clock"></i></div>
+                    <div class="stat-info">
+                        <h3>${pendingReqs.length}</h3>
+                        <p>${AuthManager.isEncargado() ? 'Solicitudes Pendientes' : 'Mis Solicitudes Pendientes'}</p>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-icon" style="background: var(--gradient-success);"><i class="fas fa-check-circle"></i></div>
+                    <div class="stat-info">
+                        <h3>${reqStats.aprobadas}</h3>
+                        <p>Solicitudes Aprobadas</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-file-alt" style="margin-right:8px;color:var(--primary);"></i>Documentos Recientes</h3>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('documentos')">Ver todos</button>
+                    </div>
+                    <div class="card-body no-padding">
+                        ${docStats.recientes.length > 0 ? `
+                            <div class="doc-list" style="padding:12px;">
+                                ${docStats.recientes.map(doc => {
+                                    const dep = DEPARTAMENTOS[doc.departamento];
+                                    return `
+                                    <div class="doc-item" onclick="App.navigate('ver-documento', {id:'${doc.id}'})">
+                                        <div class="doc-icon" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-file'}"></i></div>
+                                        <div class="doc-info">
+                                            <h4>${doc.titulo}</h4>
+                                            <div class="doc-meta">
+                                                <span>${doc.tipoNombre}</span>
+                                                <span>•</span>
+                                                <span>${timeAgo(doc.fechaCreacion)}</span>
+                                            </div>
+                                        </div>
+                                        <span class="doc-code">${doc.codigo}</span>
+                                    </div>`;
+                                }).join('')}
+                            </div>
+                        ` : `
+                            <div class="empty-state">
+                                <i class="fas fa-file-alt"></i>
+                                <h3>No hay documentos</h3>
+                                <p>Crea tu primer documento</p>
+                                <button class="btn btn-primary" onclick="App.navigate('crear-documento')">Crear documento</button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-bell" style="margin-right:8px;color:var(--warning);"></i>Solicitudes Pendientes</h3>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('${AuthManager.isEncargado() ? 'gestionar-solicitudes' : 'solicitudes'}')">Ver todas</button>
+                    </div>
+                    <div class="card-body no-padding">
+                        ${pendingReqs.length > 0 ? `
+                            <div style="padding:12px;">
+                                ${pendingReqs.slice(0, 5).map(req => `
+                                    <div class="request-card status-pendiente" style="cursor:pointer;" onclick="App.navigate('${AuthManager.isEncargado() ? 'gestionar-solicitudes' : 'solicitudes'}')">
+                                        <div class="request-header">
+                                            <h4>${req.tipoNombre}</h4>
+                                            <span class="status-badge pendiente"><i class="fas fa-clock"></i> Pendiente</span>
+                                        </div>
+                                        <div style="font-size:0.82rem;color:var(--text-secondary);">
+                                            <span>${req.solicitanteNombre}</span> • <span>${timeAgo(req.fechaSolicitud)}</span>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : `
+                            <div class="empty-state">
+                                <i class="fas fa-check-circle"></i>
+                                <h3>Sin pendientes</h3>
+                                <p>No hay solicitudes pendientes</p>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            </div>
         `;
+    }
 
-        // Small delay to show loading state
-        await new Promise(resolve => setTimeout(resolve, 300));
+    // ========================================================
+    // CREAR DOCUMENTO
+    // ========================================================
+    static async renderCrearDocumento() {
+        const user = AuthManager.getUser();
+        const content = document.getElementById('contentArea');
 
-        if (auth.isAdmin()) {
-            // Admin dashboard stats
-            const solicitudes = await db.getAll('solicitudes');
-            const pendientes = solicitudes.filter(s => s.estado === 'pendiente').length;
-            const aprobadasHoy = solicitudes.filter(s => {
-                const hoy = new Date().toISOString().split('T')[0];
-                return s.estado === 'aprobada' && s.fechaActualizacion?.startsWith(hoy);
-            }).length;
-            const rechazadas = solicitudes.filter(s => s.estado === 'rechazada').length;
-            const usuarios = await db.getAll('usuarios');
-            const activos = usuarios.filter(u => u.activo).length;
-
-            statsGrid.innerHTML = `
-                <div class="stat-card">
-                    <h3>${pendientes}</h3>
-                    <p>Solicitudes Pendientes</p>
-                </div>
-                <div class="stat-card">
-                    <h3>${aprobadasHoy}</h3>
-                    <p>Aprobadas Hoy</p>
-                </div>
-                <div class="stat-card">
-                    <h3>${rechazadas}</h3>
-                    <p>Rechazadas</p>
-                </div>
-                <div class="stat-card">
-                    <h3>${activos}</h3>
-                    <p>Empleados Activos</p>
-                </div>
-            `;
+        let depsHtml = '';
+        if (AuthManager.isAdmin()) {
+            Object.keys(DEPARTAMENTOS).forEach(key => {
+                const dep = DEPARTAMENTOS[key];
+                depsHtml += `<option value="${key}">${dep.nombre} (${dep.codigo})</option>`;
+            });
         } else {
-            // User dashboard stats
-            const solicitudes = await db.getSolicitudesByUsuario(user.id);
-            const pendientes = solicitudes.filter(s => s.estado === 'pendiente').length;
-            const aprobadas = solicitudes.filter(s => s.estado === 'aprobada').length;
-            const rechazadas = solicitudes.filter(s => s.estado === 'rechazada').length;
-            const comunicados = await db.getComunicadosByDepartamento(user.departamento);
+            const dep = DEPARTAMENTOS[user.departamento];
+            if (dep) {
+                depsHtml = `<option value="${user.departamento}">${dep.nombre} (${dep.codigo})</option>`;
+            }
+        }
 
-            statsGrid.innerHTML = `
-                <div class="stat-card">
-                    <h3>${pendientes}</h3>
-                    <p>Mis Solicitudes Pendientes</p>
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-plus-circle" style="margin-right:8px;color:var(--primary);"></i>Crear Nuevo Documento</h3>
                 </div>
-                <div class="stat-card">
-                    <h3>${aprobadas}</h3>
-                    <p>Mis Solicitudes Aprobadas</p>
+                <div class="card-body">
+                    <form id="docForm" onsubmit="App.handleCreateDocument(event)">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Departamento <span class="required">*</span></label>
+                                <select class="form-control" id="docDepartamento" onchange="App.updateCategorias()" required>
+                                    <option value="">Seleccionar departamento...</option>
+                                    ${depsHtml}
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Categoría <span class="required">*</span></label>
+                                <select class="form-control" id="docCategoria" onchange="App.updateSubcategorias()" required disabled>
+                                    <option value="">Seleccionar categoría...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Tipo de Documento <span class="required">*</span></label>
+                                <select class="form-control" id="docSubcategoria" required disabled>
+                                    <option value="">Seleccionar tipo...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Título del Documento <span class="required">*</span></label>
+                                <input type="text" class="form-control" id="docTitulo" placeholder="Ej: Comunicado sobre nuevas políticas..." required>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Para <span class="required">*</span></label>
+                                <input type="text" class="form-control" id="docPara" placeholder="Ej: Personal de Administración..." required>
+                                <small style="color:var(--text-light);margin-top:4px;display:block;">Este texto aparecerá en el PDF del documento</small>
+                            </div>
+                            <div class="form-group">
+                                <label>De <span class="required">*</span></label>
+                                <input type="text" class="form-control" id="docDe" placeholder="Nombre del remitente..." value="${user.nombre} ${user.apellido}" required>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Asunto <span class="required">*</span></label>
+                            <input type="text" class="form-control" id="docAsunto" placeholder="Ej: Nuevas políticas de trabajo..." required>
+                        </div>
+                        <div class="form-group">
+                            <label>Firmantes Requeridos <span class="required">*</span></label>
+                            <p class="form-help" style="margin-bottom:8px;">Seleccione los usuarios que deben firmar este documento. El documento aparecerá en la lista de documentos de los usuarios seleccionados.</p>
+                            <div id="firmantesContainer" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+                                <i class="fas fa-spinner fa-spin"></i> Cargando firmantes...
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Contenido del Documento <span class="required">*</span></label>
+                            <div class="editor-container">
+                                <div class="editor-toolbar">
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('bold')" title="Negrita"><i class="fas fa-bold"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('italic')" title="Cursiva"><i class="fas fa-italic"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('underline')" title="Subrayado"><i class="fas fa-underline"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('strikeThrough')" title="Tachado"><i class="fas fa-strikethrough"></i></button>
+                                    <div class="separator"></div>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('justifyLeft')" title="Alinear izquierda"><i class="fas fa-align-left"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('justifyCenter')" title="Centrar"><i class="fas fa-align-center"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('justifyRight')" title="Alinear derecha"><i class="fas fa-align-right"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('justifyFull')" title="Justificar"><i class="fas fa-align-justify"></i></button>
+                                    <div class="separator"></div>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('insertUnorderedList')" title="Lista"><i class="fas fa-list-ul"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('insertOrderedList')" title="Lista numerada"><i class="fas fa-list-ol"></i></button>
+                                    <div class="separator"></div>
+                                    <select class="toolbar-select" onchange="App.execCmdVal('fontSize', this.value)" title="Tamaño">
+                                        <option value="">Tamaño</option>
+                                        <option value="1">Pequeño</option>
+                                        <option value="3">Normal</option>
+                                        <option value="5">Grande</option>
+                                        <option value="7">Muy Grande</option>
+                                    </select>
+                                    <select class="toolbar-select" onchange="App.execCmdVal('formatBlock', this.value)" title="Formato">
+                                        <option value="">Formato</option>
+                                        <option value="h1">Título 1</option>
+                                        <option value="h2">Título 2</option>
+                                        <option value="h3">Título 3</option>
+                                        <option value="p">Párrafo</option>
+                                    </select>
+                                    <div class="separator"></div>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('removeFormat')" title="Limpiar formato"><i class="fas fa-eraser"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('undo')" title="Deshacer"><i class="fas fa-undo"></i></button>
+                                    <button type="button" class="toolbar-btn" onclick="App.execCmd('redo')" title="Rehacer"><i class="fas fa-redo"></i></button>
+                                </div>
+                                <div class="editor-content" id="docEditor" contenteditable="true" data-placeholder="Escriba el contenido del documento aquí..."></div>
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px;">
+                            <button type="button" class="btn btn-outline" onclick="App.previewDocument()"><i class="fas fa-eye"></i> Vista Previa</button>
+                            <button type="submit" class="btn btn-primary btn-lg" id="btnCrearDoc"><i class="fas fa-save"></i> Crear Documento</button>
+                        </div>
+                        <div style="margin-top:12px;padding:12px;background:var(--bg-main);border-radius:var(--radius-sm);border-left:3px solid var(--primary);">
+                            <p style="font-size:0.85rem;color:var(--text-secondary);margin:0;">
+                                <i class="fas fa-info-circle" style="margin-right:6px;color:var(--primary);"></i>
+                                Después de crear el documento, podrás generar un PDF desde la vista del documento.
+                            </p>
+                        </div>
+                    </form>
                 </div>
-                <div class="stat-card">
-                    <h3>${rechazadas}</h3>
-                    <p>Mis Solicitudes Rechazadas</p>
-                </div>
-                <div class="stat-card">
-                    <h3>${comunicados.length}</h3>
-                    <p>Comunicados de mi Departamento</p>
-                </div>
-            `;
+            </div>
+        `;
+        
+        // Cargar firmantes automáticamente
+        this.updateFirmantes();
+    }
+
+    static execCmd(cmd) {
+        document.execCommand(cmd, false, null);
+        document.getElementById('docEditor').focus();
+    }
+
+    static execCmdVal(cmd, val) {
+        if (val) {
+            document.execCommand(cmd, false, val);
+            document.getElementById('docEditor').focus();
         }
     }
 
-    /**
-     * Load comunicados
-     */
-    async loadComunicados() {
-        const user = auth.getCurrentUser();
-        const comunicadosList = document.getElementById('comunicados-list');
-        const search = document.getElementById('search-comunicados')?.value.toLowerCase() || '';
-        const filterDept = document.getElementById('filter-departamento')?.value || '';
-        const filterTipo = document.getElementById('filter-tipo')?.value || '';
+    static updateCategorias() {
+        const depId = document.getElementById('docDepartamento').value;
+        const catSelect = document.getElementById('docCategoria');
+        const subSelect = document.getElementById('docSubcategoria');
 
-        // Show loading state
-        comunicadosList.innerHTML = `
-            <div class="skeleton-card"><div class="skeleton-title skeleton"></div><div class="skeleton-text skeleton"></div><div class="skeleton-text skeleton"></div></div>
-            <div class="skeleton-card"><div class="skeleton-title skeleton"></div><div class="skeleton-text skeleton"></div><div class="skeleton-text skeleton"></div></div>
-            <div class="skeleton-card"><div class="skeleton-title skeleton"></div><div class="skeleton-text skeleton"></div><div class="skeleton-text skeleton"></div></div>
+        catSelect.innerHTML = '<option value="">Seleccionar categoría...</option>';
+        subSelect.innerHTML = '<option value="">Seleccionar tipo...</option>';
+        catSelect.disabled = true;
+        subSelect.disabled = true;
+
+        if (depId && DEPARTAMENTOS[depId]) {
+            const dep = DEPARTAMENTOS[depId];
+            Object.keys(dep.categorias).forEach(key => {
+                catSelect.innerHTML += `<option value="${key}">${key}. ${dep.categorias[key].nombre}</option>`;
+            });
+            catSelect.disabled = false;
+        }
+    }
+
+    static updateSubcategorias() {
+        const depId = document.getElementById('docDepartamento').value;
+        const catId = document.getElementById('docCategoria').value;
+        const subSelect = document.getElementById('docSubcategoria');
+
+        subSelect.innerHTML = '<option value="">Seleccionar tipo...</option>';
+        subSelect.disabled = true;
+
+        if (depId && catId && DEPARTAMENTOS[depId]) {
+            const cat = DEPARTAMENTOS[depId].categorias[catId];
+            if (cat) {
+                Object.keys(cat.subcategorias).forEach(key => {
+                    subSelect.innerHTML += `<option value="${key}">${key}. ${cat.subcategorias[key]}</option>`;
+                });
+                subSelect.disabled = false;
+            }
+        }
+    }
+
+    static async updateFirmantes() {
+        const container = document.getElementById('firmantesContainer');
+        if (!container) return;
+        
+        container.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando firmantes...';
+
+        const users = await AuthManager.getAllUsers();
+        const currentUser = AuthManager.getUser();
+        const available = users.filter(u => u.activo && u.id !== currentUser.id);
+
+        if (available.length === 0) {
+            container.innerHTML = '<p class="form-help">No hay usuarios disponibles para firmar</p>';
+            return;
+        }
+
+        // Agrupar por departamento para mejor organización
+        const usersByDep = {};
+        available.forEach(u => {
+            const dep = DEPARTAMENTOS[u.departamento];
+            const depName = dep ? dep.nombre : 'Sin departamento';
+            if (!usersByDep[depName]) usersByDep[depName] = [];
+            usersByDep[depName].push(u);
+        });
+
+        let html = '<div style="display:flex;flex-direction:column;gap:12px;">';
+        Object.keys(usersByDep).sort().forEach(depName => {
+            html += `<div style="margin-bottom:8px;"><strong style="font-size:0.85rem;color:var(--text-secondary);display:block;margin-bottom:6px;">${depName}</strong><div style="display:flex;flex-wrap:wrap;gap:8px;">`;
+            usersByDep[depName].forEach(u => {
+                const dep = DEPARTAMENTOS[u.departamento];
+                html += `
+                    <label style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:0.82rem;transition:var(--transition);background:white;">
+                        <input type="checkbox" class="firmante-check" value="${u.id}">
+                        <span>${u.nombre} ${u.apellido}</span>
+                        <small style="color:var(--text-light);">(${ROLES[u.rol]?.nombre})</small>
+                    </label>
+                `;
+            });
+            html += '</div></div>';
+        });
+        html += '</div>';
+
+        container.innerHTML = html;
+    }
+
+    static async handleCreateDocument(e) {
+        e.preventDefault();
+
+        const depId = document.getElementById('docDepartamento').value;
+        const catId = document.getElementById('docCategoria').value;
+        const subId = document.getElementById('docSubcategoria').value;
+        const titulo = document.getElementById('docTitulo').value;
+        const para = document.getElementById('docPara').value;
+        const de = document.getElementById('docDe').value;
+        const asunto = document.getElementById('docAsunto').value;
+        const contenido = document.getElementById('docEditor').innerHTML;
+
+        if (!depId || !catId || !subId || !titulo || !para || !de || !asunto || !contenido.trim() || contenido === '<br>') {
+            Toast.error('Error', 'Por favor complete todos los campos requeridos');
+            return;
+        }
+
+        const dep = DEPARTAMENTOS[depId];
+        const cat = dep.categorias[catId];
+        const tipoNombre = cat.subcategorias[subId];
+
+        const firmasRequeridas = [];
+        document.querySelectorAll('.firmante-check:checked').forEach(cb => {
+            firmasRequeridas.push(cb.value);
+        });
+
+        if (firmasRequeridas.length === 0) {
+            Toast.error('Error', 'Debe seleccionar al menos un firmante requerido');
+            return;
+        }
+
+        const btn = document.getElementById('btnCrearDoc');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
+
+        try {
+            const doc = await DocumentManager.create({
+                departamento: depId,
+                categoria: catId,
+                subcategoria: subId,
+                tipoNombre: tipoNombre,
+                titulo: titulo,
+                para: para,
+                de: de,
+                asunto: asunto,
+                contenido: contenido,
+                firmasRequeridas: firmasRequeridas
+            });
+
+            Toast.success('Documento creado', `Código: ${doc.codigo}`);
+            this.navigate('ver-documento', { id: doc.id });
+        } catch (error) {
+            Toast.error('Error', 'No se pudo crear el documento');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Crear Documento';
+        }
+    }
+
+    static previewDocument() {
+        const titulo = document.getElementById('docTitulo').value || 'Sin título';
+        const contenido = document.getElementById('docEditor').innerHTML;
+        const depId = document.getElementById('docDepartamento').value;
+        const subId = document.getElementById('docSubcategoria').value;
+        const dep = DEPARTAMENTOS[depId];
+        const previewCode = depId && subId ? `${depId}-${subId}-XXX` : 'Código pendiente';
+
+        this.showModal('Vista Previa del Documento', `
+            <div class="doc-preview" style="box-shadow:none;">
+                <div class="doc-preview-header" style="background:${dep?.color || 'var(--primary)'};">
+                    <p style="font-size:0.85rem;opacity:0.8;">${dep?.nombre || 'Departamento'}</p>
+                    <h2>${titulo}</h2>
+                    <span class="doc-preview-code">${previewCode}</span>
+                </div>
+                <div class="doc-preview-body">${contenido || '<p style="color:var(--text-light)">Sin contenido</p>'}</div>
+                <div class="doc-preview-footer" style="text-align:center;">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);"><i class="fas fa-signature" style="margin-right:6px;"></i>Área de firmas digitales</p>
+                </div>
+            </div>
+        `, true);
+    }
+
+    // ========================================================
+    // DOCUMENTOS (LISTA)
+    // ========================================================
+    static async renderDocumentos() {
+        const allDocs = await DocumentManager.getAll();
+        const user = AuthManager.getUser();
+        
+        // Filtrar documentos: mostrar solo los que requieren la firma del usuario (o todos si es admin)
+        let filteredDocs = allDocs.filter(d => d.estado === 'activo');
+        
+        if (!AuthManager.isAdmin()) {
+            // Los usuarios solo ven documentos donde están en firmasRequeridas o que ellos crearon
+            filteredDocs = filteredDocs.filter(d => {
+                const firmasRequeridas = d.firmasRequeridas || [];
+                return firmasRequeridas.includes(user.id) || d.creadoPor === user.id;
+            });
+        }
+        
+        const content = document.getElementById('contentArea');
+
+        let depFilterHtml = '<option value="">Todos los departamentos</option>';
+        Object.keys(DEPARTAMENTOS).forEach(key => {
+            depFilterHtml += `<option value="${key}">${DEPARTAMENTOS[key].nombre}</option>`;
+        });
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-folder-open" style="margin-right:8px;color:var(--primary);"></i>Documentos</h3>
+                    ${AuthManager.hasPermission('crear_documento') ? `
+                        <button class="btn btn-primary btn-sm" onclick="App.navigate('crear-documento')"><i class="fas fa-plus"></i> Nuevo</button>
+                    ` : ''}
+                </div>
+                <div class="card-body">
+                    <div class="filters-bar">
+                        <div class="search-input">
+                            <i class="fas fa-search"></i>
+                            <input type="text" placeholder="Buscar documentos..." id="docSearchInput" oninput="App.filterDocuments()">
+                        </div>
+                        <select class="filter-select" id="docDepFilter" onchange="App.filterDocuments()">
+                            ${depFilterHtml}
+                        </select>
+                    </div>
+                    <div id="docListContainer">${this.renderDocList(filteredDocs)}</div>
+                </div>
+            </div>
         `;
 
-        // Small delay for better UX
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Store docs for filtering (todos los documentos para admins, filtrados para usuarios)
+        this._cachedDocs = filteredDocs;
+    }
 
-        let comunicados = await db.getAll('comunicados');
+    static _cachedDocs = [];
 
-        // Filter by user's department if not admin
-        if (!auth.isAdmin()) {
-            comunicados = comunicados.filter(c => c.departamento === user.departamento || c.tipo === 'externo');
+    static renderDocList(docs) {
+        if (docs.length === 0) {
+            return `<div class="empty-state"><i class="fas fa-file-alt"></i><h3>No hay documentos</h3><p>No se encontraron documentos con los filtros seleccionados</p></div>`;
         }
 
-        // Apply filters
-        if (filterDept) {
-            comunicados = comunicados.filter(c => c.departamento === filterDept);
-        }
-        if (filterTipo) {
-            comunicados = comunicados.filter(c => c.tipo === filterTipo);
-        }
-        if (search) {
-            comunicados = comunicados.filter(c => 
-                c.titulo.toLowerCase().includes(search) ||
-                c.contenido.toLowerCase().includes(search) ||
-                c.codigo.toLowerCase().includes(search)
-            );
-        }
-
-        // Sort by date (newest first)
-        comunicados.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
-
-        if (comunicados.length === 0) {
-            comunicadosList.innerHTML = `
-                <div class="empty-state" style="grid-column: 1 / -1;">
-                    <span class="empty-state-icon">📭</span>
-                    <h3>No se encontraron comunicados</h3>
-                    <p>No hay comunicados que coincidan con los filtros seleccionados. Intenta ajustar tus criterios de búsqueda.</p>
-                    ${auth.isAdmin() ? `
-                        <div class="empty-state-actions">
-                            <button class="btn btn-primary" onclick="document.getElementById('btn-new-comunicado').click()">
-                                Crear Comunicado
+        return `<div class="doc-list">
+            ${docs.sort((a, b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)).map(doc => {
+                const dep = DEPARTAMENTOS[doc.departamento];
+                const firmas = doc.firmas ? Object.keys(doc.firmas).length : 0;
+                const firmasRequeridas = doc.firmasRequeridas ? doc.firmasRequeridas.length : 0;
+                const canManage = AuthManager.isAdmin() || AuthManager.isEncargado();
+                return `
+                <div class="doc-item">
+                    <div style="display:flex;align-items:center;flex:1;cursor:pointer;" onclick="App.navigate('ver-documento', {id:'${doc.id}'})">
+                        <div class="doc-icon" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-file'}"></i></div>
+                        <div class="doc-info" style="flex:1;">
+                            <h4>${doc.titulo}</h4>
+                            <div class="doc-meta">
+                                <span class="dep-chip" style="background:${dep?.color || '#546e7a'}">${dep?.nombre || 'N/A'}</span>
+                                <span>${doc.tipoNombre}</span><span>•</span>
+                                <span>${doc.creadoPorNombre}</span><span>•</span>
+                                <span>${timeAgo(doc.fechaCreacion)}</span><span>•</span>
+                                <span><i class="fas fa-signature" style="margin-right:3px;"></i>${firmas}${firmasRequeridas > 0 ? `/${firmasRequeridas}` : ''} firma(s)</span>
+                            </div>
+                        </div>
+                        <span class="doc-code">${doc.codigo}</span>
+                    </div>
+                    ${canManage && firmasRequeridas > 0 ? `
+                        <div style="display:flex;gap:6px;margin-left:10px;">
+                            <button class="btn btn-sm btn-outline" onclick="event.stopPropagation();App.navigate('estado-firmas', {id:'${doc.id}'})" title="Ver estado de firmas">
+                                <i class="fas fa-clipboard-check"></i>
                             </button>
                         </div>
                     ` : ''}
-                </div>
-            `;
-            return;
-        }
-
-        comunicadosList.innerHTML = comunicados.map(c => `
-            <div class="comunicado-card" style="cursor: pointer;" data-comunicado-id="${c.id}">
-                <div class="comunicado-header">
-                    <span class="comunicado-codigo">${c.codigo}</span>
-                    <span class="comunicado-tipo badge-${c.tipo}">${c.tipo.toUpperCase()}</span>
-                </div>
-                <h3 class="comunicado-titulo">${this.escapeHtml(c.asunto || c.titulo || 'Sin asunto')}</h3>
-                <p class="comunicado-contenido">${this.escapeHtml(c.contenido.substring(0, 200))}${c.contenido.length > 200 ? '...' : ''}</p>
-                <div class="comunicado-footer">
-                    <span class="comunicado-departamento">${c.departamento}</span>
-                    <span class="comunicado-fecha">${this.formatDate(c.fecha)}</span>
-                    <div style="display: flex; gap: 0.5rem;">
-                        <button class="btn btn-sm btn-secondary firmas-btn" data-comunicado-id="${c.id}" title="Ver firmas" style="display: inline-flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
-                            <span>✍️</span> Firmas
-                        </button>
-                        <button class="btn btn-sm btn-secondary export-pdf-btn" data-comunicado-id="${c.id}" title="Exportar este comunicado a PDF" style="display: inline-flex; align-items: center; gap: 4px;" onclick="event.stopPropagation();">
-                            <span>📄</span> PDF
-                        </button>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-        
-        // Agregar event listeners para abrir el comunicado al hacer clic
-        comunicadosList.querySelectorAll('.comunicado-card').forEach(card => {
-            card.addEventListener('click', async (e) => {
-                if (e.target.closest('.export-pdf-btn')) return; // No abrir si se hace clic en el botón PDF
-                const id = parseInt(card.getAttribute('data-comunicado-id'));
-                if (id) {
-                    await this.showComunicadoDetalle(id);
-                }
-            });
-        });
-        
-        // Attach event listeners to PDF buttons
-        comunicadosList.querySelectorAll('.export-pdf-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const id = parseInt(btn.getAttribute('data-comunicado-id'));
-                if (id && window.app && window.app.exportComunicadoPDF) {
-                    await window.app.exportComunicadoPDF(id);
-                } else {
-                    showNotification('Error: No se pudo obtener el ID del comunicado', 'error');
-                }
-            });
-        });
-
-        // Attach event listeners to firmas buttons
-        comunicadosList.querySelectorAll('.firmas-btn').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const id = parseInt(btn.getAttribute('data-comunicado-id'));
-                if (id && window.app && window.app.mostrarFirmasComunicado) {
-                    await window.app.mostrarFirmasComunicado(id);
-                } else {
-                    showNotification('Error: No se pudo obtener el ID del comunicado', 'error');
-                }
-            });
-        });
+                </div>`;
+            }).join('')}
+        </div>`;
     }
 
-    /**
-     * Show comunicado detail in document format
-     */
-    async showComunicadoDetalle(id) {
-        try {
-            const comunicado = await db.get('comunicados', id);
-            if (!comunicado) {
-                showNotification('Comunicado no encontrado', 'error');
-                return;
-            }
-
-            const documentoContainer = document.getElementById('comunicado-documento');
-            if (!documentoContainer) return;
-
-            // Obtener información del departamento
-            const departamentos = await db.getAll('departamentos');
-            const deptInfo = departamentos.find(d => d.codigo === comunicado.departamento);
-            const deptNombre = deptInfo ? deptInfo.nombre : comunicado.departamento;
-
-            // Formatear fecha
-            const fechaComunicado = this.formatDate(comunicado.fecha);
-            const fechaCreacion = new Date(comunicado.fechaCreacion);
-            const fechaCreacionFormato = fechaCreacion.toLocaleDateString('es-ES', { 
-                day: '2-digit', 
-                month: '2-digit', 
-                year: 'numeric' 
-            });
-
-            // Determinar el tipo de comunicación para el título
-            const tipoTexto = comunicado.tipo === 'interno' ? 'INTERNA' : 'EXTERNA';
-            const tipoTextoCompleto = `COMUNICACIÓN OFICIAL ${tipoTexto}`;
-
-            // Renderizar el documento
-            documentoContainer.innerHTML = `
-                <div class="comunicado-documento-wrapper">
-                    <div class="comunicado-documento-header">
-                        <div class="comunicado-logo-section">
-                            <div class="comunicado-logo-placeholder">
-                                <img src="img/empresa.jpg" alt="Logo de la Empresa" class="comunicado-logo-img" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                <div class="logo-circle" style="display: none;">
-                                    <span>🏥</span>
-                                </div>
-                            </div>
-                            <div class="comunicado-empresa-info">
-                                <h1>VETERINARIA SAN MARTIN DE PORRES</h1>
-                                <p class="comunicado-empresa-id">3-105-761559</p>
-                            </div>
-                        </div>
-                        <div class="comunicado-metadata">
-                            <div class="comunicado-metadata-item">Página:</div>
-                            <div class="comunicado-metadata-item" id="comunicado-pagina-actual">1 de 1</div>
-                            <div class="comunicado-metadata-item">Código:</div>
-                            <div class="comunicado-metadata-item">${comunicado.codigo || 'N/A'}</div>
-                            <div class="comunicado-metadata-item">Fecha:</div>
-                            <div class="comunicado-metadata-item">${fechaCreacionFormato}</div>
-                        </div>
-                    </div>
-                    
-                    <div class="comunicado-documento-title">
-                        <h2>${tipoTextoCompleto}.</h2>
-                        <p class="comunicado-fecha-destacada">${fechaComunicado}.</p>
-                    </div>
-                    
-                    <div class="comunicado-documento-info">
-                        <div class="comunicado-info-row">
-                            <strong>Para:</strong> <span class="comunicado-highlight">${this.escapeHtml(comunicado.para || 'N/A')}</span>
-                        </div>
-                        <div class="comunicado-info-row">
-                            <strong>De:</strong> ${this.escapeHtml(comunicado.de || `${deptNombre} – Veterinaria San Martin de Porres`)}
-                        </div>
-                        <div class="comunicado-info-row">
-                            <strong>Asunto:</strong> <span class="comunicado-highlight">${this.escapeHtml(comunicado.asunto || 'N/A')}</span>
-                        </div>
-                    </div>
-                    
-                    <div class="comunicado-documento-body">
-                        ${this.formatComunicadoContent(comunicado.contenido)}
-                    </div>
-                    
-                    <div class="comunicado-documento-footer">
-                        <div class="comunicado-firma">
-                            <p><strong>${comunicado.usuarioNombre || 'N/A'}</strong></p>
-                            <p>${deptNombre}</p>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            // Abrir el modal
-            const modal = document.getElementById('modal-ver-comunicado');
-            if (modal) {
-                modal.style.display = 'flex';
-                
-                // Esperar a que el contenido se renderice y calcular páginas
-                setTimeout(() => {
-                    this.calcularPaginasComunicado();
-                }, 100);
-                
-                // Recalcular al cambiar el tamaño de la ventana
-                window.addEventListener('resize', () => {
-                    this.calcularPaginasComunicado();
-                });
-                
-                // Configurar el botón de exportar
-                const btnExport = document.getElementById('btn-export-comunicado-detalle');
-                if (btnExport) {
-                    btnExport.onclick = () => {
-                        this.exportComunicadoPDF(id);
-                    };
-                }
-                
-                // Configurar el botón de firmas
-                const btnFirmas = document.getElementById('btn-firmas-comunicado');
-                if (btnFirmas) {
-                    btnFirmas.onclick = () => {
-                        this.mostrarFirmasComunicado(id);
-                    };
-                }
-            }
-        } catch (error) {
-            console.error('Error al mostrar comunicado:', error);
-            showNotification('Error al cargar el comunicado', 'error');
-        }
-    }
-
-    /**
-     * Calculate number of pages for comunicado based on A4 size
-     */
-    calcularPaginasComunicado() {
-        const wrapper = document.querySelector('.comunicado-documento-wrapper');
-        if (!wrapper) return;
-        
-        // Obtener dimensiones del wrapper
-        const wrapperWidth = wrapper.offsetWidth || wrapper.scrollWidth || 800;
-        const contentHeight = wrapper.scrollHeight;
-        
-        // Tamaño A4 en milímetros
-        const A4_WIDTH_MM = 210;
-        const A4_HEIGHT_MM = 297;
-        
-        // El wrapper tiene max-width: 800px en CSS, que corresponde a 210mm en A4
-        // Calcular factor de escala basado en el ancho real
-        const wrapperWidthMM = 210; // El wrapper está diseñado para 210mm (A4 width)
-        const scaleFactor = wrapperWidthMM / wrapperWidth;
-        
-        // Altura del contenido en milímetros
-        const contentHeightMM = contentHeight * scaleFactor;
-        
-        // Altura usable por página (considerando márgenes de 10mm arriba y abajo = 20mm total)
-        const marginMM = 20;
-        const usableHeightMM = A4_HEIGHT_MM - marginMM; // 277mm por página
-        
-        // Calcular número de páginas
-        const totalPages = Math.max(1, Math.ceil(contentHeightMM / usableHeightMM));
-        
-        // Actualizar el contador de páginas
-        const paginaElement = document.getElementById('comunicado-pagina-actual');
-        if (paginaElement) {
-            paginaElement.textContent = `1 de ${totalPages}`;
-        }
-        
-        // Guardar el total de páginas para uso en PDF
-        wrapper.dataset.totalPages = totalPages;
-        
-        return totalPages;
-    }
-
-    /**
-     * Generate random 4-character code (letters, numbers, symbols)
-     */
-    generarCodigoPersonal() {
-        const caracteres = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*';
-        let codigo = '';
-        for (let i = 0; i < 4; i++) {
-            codigo += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
-        }
-        return codigo;
-    }
-
-    /**
-     * Check if code is unique
-     */
-    async verificarCodigoUnico(codigo) {
-        const usuarios = await db.getAll('usuarios');
-        return !usuarios.some(u => u.codigoPersonal && u.codigoPersonal === codigo);
-    }
-
-    /**
-     * Generate unique code
-     */
-    async generarCodigoUnico() {
-        let codigo;
-        let intentos = 0;
-        do {
-            codigo = this.generarCodigoPersonal();
-            intentos++;
-            if (intentos > 100) {
-                throw new Error('No se pudo generar un código único después de 100 intentos');
-            }
-        } while (!(await this.verificarCodigoUnico(codigo)));
-        return codigo;
-    }
-
-    /**
-     * Show firmas modal for comunicado
-     */
-    async mostrarFirmasComunicado(comunicadoId) {
-        try {
-            const comunicado = await db.get('comunicados', comunicadoId);
-            if (!comunicado) {
-                showNotification('Comunicado no encontrado', 'error');
-                return;
-            }
-
-            // Obtener usuario actual
-            const currentUser = auth.getCurrentUser();
-            const isAdmin = auth.isAdmin();
-
-            // Obtener solo empleados (usuarios con código personal)
-            const usuarios = await db.getAll('usuarios');
-            let empleados;
-            
-            if (isAdmin) {
-                // Admin ve todos los empleados
-                empleados = usuarios.filter(u => u.activo !== false && u.codigoPersonal);
-            } else {
-                // Usuario regular solo ve su propio registro
-                empleados = usuarios.filter(u => u.id === currentUser.id && u.codigoPersonal);
-                
-                if (empleados.length === 0) {
-                    // Si el usuario actual no tiene código personal, mostrar mensaje
-                    const listaContainer = document.getElementById('firmas-comunicado-lista');
-                    if (listaContainer) {
-                        listaContainer.innerHTML = '<p style="padding: 1rem; text-align: center; color: #ef4444;">No tienes un código personal asignado. Contacta al administrador.</p>';
-                    }
-                    
-                    // Ocultar formulario de firmar
-                    const formFirmar = document.getElementById('firmar-comunicado-form');
-                    if (formFirmar) {
-                        formFirmar.style.display = 'none';
-                    }
-                    
-                    // Abrir modal
-                    const modal = document.getElementById('modal-firmas-comunicado');
-                    if (modal) {
-                        modal.style.display = 'flex';
-                    }
-                    return;
-                }
-            }
-
-            // Obtener firmas existentes
-            const firmas = await db.query('firmas_comunicados', 'comunicadoId', comunicadoId);
-            const firmasMap = new Map();
-            firmas.forEach(f => {
-                firmasMap.set(f.usuarioId, f);
-            });
-
-            // Renderizar lista de empleados
-            const listaContainer = document.getElementById('firmas-comunicado-lista');
-            if (!listaContainer) return;
-
-            if (empleados.length === 0) {
-                listaContainer.innerHTML = '<p>No hay empleados registrados. Los empleados deben tener un código personal asignado.</p>';
-                return;
-            }
-
-            // Mostrar u ocultar formulario de firmar según el rol
-            const formFirmar = document.getElementById('firmar-comunicado-form');
-            if (formFirmar) {
-                if (isAdmin) {
-                    formFirmar.style.display = 'none'; // Admin no necesita firmar, solo ver
-                } else {
-                    formFirmar.style.display = 'block'; // Usuario regular puede firmar
-                }
-            }
-
-            listaContainer.innerHTML = `
-                ${isAdmin ? `
-                    <div style="margin-bottom: 1rem;">
-                        <strong>Total de empleados: ${empleados.length}</strong> | 
-                        <strong style="color: #10b981;">Firmados: ${firmasMap.size}</strong> | 
-                        <strong style="color: #ef4444;">Pendientes: ${empleados.length - firmasMap.size}</strong>
-                    </div>
-                ` : `
-                    <div style="margin-bottom: 1rem; text-align: center;">
-                        <strong>Tu estado de firma</strong>
-                    </div>
-                `}
-                <div style="display: grid; gap: 0.75rem;">
-                    ${empleados.map(usuario => {
-                        const firma = firmasMap.get(usuario.id);
-                        const haFirmado = !!firma;
-                        const codigoPersonal = usuario.codigoPersonal || 'No asignado';
-                        
-                        return `
-                            <div class="firma-empleado-item" style="
-                                display: flex; 
-                                align-items: center; 
-                                justify-content: space-between;
-                                padding: 1rem;
-                                border: 1px solid ${haFirmado ? '#10b981' : '#e5e7eb'};
-                                border-radius: 8px;
-                                background: ${haFirmado ? '#f0fdf4' : '#ffffff'};
-                            ">
-                                <div style="flex: 1;">
-                                    <div style="display: flex; align-items: center; gap: 0.75rem;">
-                                        <span style="
-                                            display: inline-flex;
-                                            align-items: center;
-                                            justify-content: center;
-                                            width: 24px;
-                                            height: 24px;
-                                            border-radius: 50%;
-                                            background: ${haFirmado ? '#10b981' : '#e5e7eb'};
-                                            color: ${haFirmado ? '#ffffff' : '#6b7280'};
-                                            font-size: 14px;
-                                            font-weight: 600;
-                                        ">
-                                            ${haFirmado ? '✓' : ''}
-                                        </span>
-                                        <div>
-                                            <strong>${this.escapeHtml(usuario.nombre)}</strong>
-                                            <div style="font-size: 0.875rem; color: #6b7280;">
-                                                ${this.escapeHtml(usuario.email)}
-                                                ${isAdmin ? ` | Código: <strong>${this.escapeHtml(codigoPersonal)}</strong>` : ''}
-                                            </div>
-                                            ${!isAdmin ? `
-                                                <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem;">
-                                                    Tu código personal: <strong style="font-family: monospace; letter-spacing: 2px;">${this.escapeHtml(codigoPersonal)}</strong>
-                                                </div>
-                                            ` : ''}
-                                            ${firma ? `
-                                                <div style="font-size: 0.75rem; color: #10b981; margin-top: 0.25rem;">
-                                                    Firmado el ${new Date(firma.fecha).toLocaleDateString('es-ES', { 
-                                                        day: '2-digit', 
-                                                        month: '2-digit', 
-                                                        year: 'numeric',
-                                                        hour: '2-digit',
-                                                        minute: '2-digit'
-                                                    })}
-                                                </div>
-                                            ` : ''}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div style="
-                                    padding: 0.5rem 1rem;
-                                    border-radius: 6px;
-                                    font-weight: 600;
-                                    font-size: 0.875rem;
-                                    ${haFirmado ? 'background: #10b981; color: #ffffff;' : 'background: #f3f4f6; color: #6b7280;'}
-                                ">
-                                    ${haFirmado ? 'FIRMADO' : 'PENDIENTE'}
-                                </div>
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            `;
-
-            // Configurar botón de firmar
-            const btnFirmar = document.getElementById('btn-firmar-comunicado');
-            if (btnFirmar) {
-                btnFirmar.onclick = async () => {
-                    await this.firmarComunicado(comunicadoId);
-                };
-            }
-
-            // Abrir modal
-            const modal = document.getElementById('modal-firmas-comunicado');
-            if (modal) {
-                modal.style.display = 'flex';
-            }
-        } catch (error) {
-            console.error('Error al mostrar firmas:', error);
-            showNotification('Error al cargar las firmas', 'error');
-        }
-    }
-
-    /**
-     * Firmar comunicado con código personal
-     */
-    async firmarComunicado(comunicadoId) {
-        try {
-            const codigoInput = document.getElementById('codigo-firma-personal');
-            if (!codigoInput) return;
-
-            let codigoIngresado = codigoInput.value.trim();
-            if (!codigoIngresado) {
-                showNotification('Por favor ingrese su código personal', 'error');
-                return;
-            }
-
-            // Normalizar a mayúsculas para comparación
-            codigoIngresado = codigoIngresado.toUpperCase();
-
-            // Buscar usuario por código personal (comparación case-insensitive)
-            const usuarios = await db.getAll('usuarios');
-            
-            const usuario = usuarios.find(u => {
-                if (!u.codigoPersonal) return false;
-                // Comparar normalizando ambos a mayúsculas
-                const codigoBD = u.codigoPersonal.toUpperCase();
-                return codigoBD === codigoIngresado;
-            });
-
-            if (!usuario) {
-                showNotification('Código personal no válido', 'error');
-                return;
-            }
-
-            // Verificar si ya firmó
-            const firmasExistentes = await db.query('firmas_comunicados', 'comunicadoId', comunicadoId);
-            const yaFirmo = firmasExistentes.some(f => f.usuarioId === usuario.id);
-
-            if (yaFirmo) {
-                showNotification('Ya has firmado este comunicado', 'info');
-                return;
-            }
-
-            // Crear firma
-            const firma = {
-                comunicadoId,
-                usuarioId: usuario.id,
-                usuarioNombre: usuario.nombre,
-                codigoPersonal: codigoIngresado, // Usar codigoIngresado que ya está normalizado
-                fecha: new Date().toISOString(),
-                fechaTimestamp: Date.now()
-            };
-
-            await db.add('firmas_comunicados', firma);
-            await db.addAuditoria('COMUNICADO_FIRMA', { 
-                comunicadoId, 
-                usuarioId: usuario.id,
-                codigoPersonal: codigoIngresado
-            });
-
-            showNotification(`Firmado exitosamente como ${usuario.nombre}`, 'success');
-            
-            // Limpiar input
-            codigoInput.value = '';
-
-            // Recargar lista de firmas
-            await this.mostrarFirmasComunicado(comunicadoId);
-        } catch (error) {
-            console.error('Error al firmar:', error);
-            if (error.message && error.message.includes('unique')) {
-                showNotification('Ya has firmado este comunicado', 'error');
-            } else {
-                showNotification('Error al firmar el comunicado', 'error');
-            }
-        }
-    }
-
-    /**
-     * Format comunicado content with paragraphs
-     */
-    formatComunicadoContent(content) {
-        if (!content) return '';
-        
-        // Dividir por saltos de línea y crear párrafos
-        const paragraphs = content.split('\n').filter(p => p.trim());
-        return paragraphs.map(p => {
-            const trimmed = p.trim();
-            // Si el párrafo parece ser un título (todo mayúsculas o empieza con números)
-            if (trimmed.match(/^[A-ZÁÉÍÓÚÑ\s]+$/) || trimmed.match(/^ARTICULO|^ARTÍCULO/)) {
-                return `<p class="comunicado-paragraph-title">${this.escapeHtml(trimmed)}</p>`;
-            }
-            // Si empieza con letra seguida de punto y paréntesis (lista)
-            if (trimmed.match(/^[a-z]\)\./)) {
-                return `<p class="comunicado-paragraph">${this.escapeHtml(trimmed)}</p>`;
-            }
-            return `<p class="comunicado-paragraph">${this.escapeHtml(trimmed)}</p>`;
-        }).join('');
-    }
-
-    /**
-     * Load solicitudes
-     */
-    async loadSolicitudes() {
-        const user = auth.getCurrentUser();
-        let solicitudes = await db.getSolicitudesByUsuario(user.id);
-
-        // Apply filters
-        solicitudes = this.applySolicitudesFilters(solicitudes);
-
-        // Sort by date (newest first)
-        solicitudes.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
-
-        // Render statistics
-        await solicitudesEnhancements.renderStatistics('solicitudes-stats-container', user.id);
-
-        // Render based on current view
-        if (this.currentSolicitudesView === 'timeline') {
-            await this.renderSolicitudesTimeline(solicitudes);
-        } else if (this.currentSolicitudesView === 'calendar') {
-            await this.renderSolicitudesCalendar(solicitudes);
-        } else {
-            await this.renderSolicitudesList(solicitudes);
-        }
-    }
-
-    /**
-     * Render solicitudes list view
-     */
-    async renderSolicitudesList(solicitudes) {
-        const solicitudesList = document.getElementById('solicitudes-list');
-        const timelineView = document.getElementById('solicitudes-timeline');
-        const calendarView = document.getElementById('solicitudes-calendar');
-
-        solicitudesList.style.display = 'block';
-        if (timelineView) timelineView.style.display = 'none';
-        if (calendarView) calendarView.style.display = 'none';
-
-        if (solicitudes.length === 0) {
-            solicitudesList.innerHTML = `
-                <div class="empty-state">
-                    <span class="empty-state-icon">📋</span>
-                    <h3>No tienes solicitudes</h3>
-                    <p>Aún no has creado ninguna solicitud. Puedes crear una nueva solicitud de permisos, vacaciones u otras necesidades.</p>
-                    <div class="empty-state-actions">
-                        <button class="btn btn-primary" onclick="document.getElementById('btn-new-solicitud').click()">
-                            Nueva Solicitud
-                        </button>
-                    </div>
-                </div>
-            `;
-            return;
-        }
-
-        solicitudesList.innerHTML = solicitudes.map(s => `
-            <div class="solicitud-card solicitud-${s.estado}">
-                <div class="solicitud-header">
-                    <h3>${this.getSolicitudTipoLabel(s.tipo)}</h3>
-                    <span class="badge-${s.estado}">${s.estado.toUpperCase()}</span>
-                </div>
-                <div class="solicitud-body">
-                    ${this.renderSolicitudDetails(s)}
-                </div>
-                ${s.justificacion ? `<div class="solicitud-justificacion"><strong>Justificación:</strong> ${this.escapeHtml(s.justificacion)}</div>` : ''}
-                <div class="solicitud-footer">
-                    <span>${this.formatDate(s.fecha)}</span>
-                    ${s.fechaActualizacion ? `<span>Actualizado: ${this.formatDate(s.fechaActualizacion)}</span>` : ''}
-                    <button class="btn btn-sm btn-secondary" onclick="window.app.viewSolicitudComments(${s.id})" title="Ver comentarios">
-                        💬 Comentarios
-                    </button>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    /**
-     * Render timeline view
-     */
-    async renderSolicitudesTimeline(solicitudes) {
-        const solicitudesList = document.getElementById('solicitudes-list');
-        const timelineView = document.getElementById('solicitudes-timeline');
-        const calendarView = document.getElementById('solicitudes-calendar');
-
-        solicitudesList.style.display = 'none';
-        if (timelineView) timelineView.style.display = 'block';
-        if (calendarView) calendarView.style.display = 'none';
-
-        await this.solicitudesTimeline.renderTimeline('solicitudes-timeline', solicitudes);
-    }
-
-    /**
-     * Render calendar view
-     */
-    async renderSolicitudesCalendar(solicitudes) {
-        const solicitudesList = document.getElementById('solicitudes-list');
-        const timelineView = document.getElementById('solicitudes-timeline');
-        const calendarView = document.getElementById('solicitudes-calendar');
-
-        solicitudesList.style.display = 'none';
-        if (timelineView) timelineView.style.display = 'none';
-        if (calendarView) calendarView.style.display = 'block';
-
-        await this.solicitudesTimeline.renderCalendarView('solicitudes-calendar', solicitudes);
-    }
-
-    /**
-     * Toggle solicitudes view
-     */
-    toggleSolicitudesView(view) {
-        this.currentSolicitudesView = view;
-        
-        // Update button states
-        document.querySelectorAll('.view-toggle-btn').forEach(btn => {
-            btn.classList.remove('active');
-            if (btn.dataset.view === view) {
-                btn.classList.add('active');
-            }
-        });
-
-        // Show/hide filters
-        const filtersBar = document.getElementById('solicitudes-filters-bar');
-        if (filtersBar) {
-            filtersBar.style.display = view !== 'list' ? 'flex' : 'none';
-        }
-
-        // Reload solicitudes with new view
-        this.loadSolicitudes();
-    }
-
-    /**
-     * Apply filters to solicitudes
-     */
-    applySolicitudesFilters(solicitudes) {
-        const filterEstado = document.getElementById('solicitudes-filter-estado')?.value || '';
-        const filterTipo = document.getElementById('solicitudes-filter-tipo')?.value || '';
-        const filterFechaInicio = document.getElementById('solicitudes-filter-fecha-inicio')?.value || '';
-        const filterFechaFin = document.getElementById('solicitudes-filter-fecha-fin')?.value || '';
-
-        let filtered = solicitudes;
-
-        if (filterEstado) {
-            filtered = filtered.filter(s => s.estado === filterEstado);
-        }
-        if (filterTipo) {
-            filtered = filtered.filter(s => s.tipo === filterTipo);
-        }
-        if (filterFechaInicio) {
-            filtered = filtered.filter(s => s.fecha >= filterFechaInicio);
-        }
-        if (filterFechaFin) {
-            filtered = filtered.filter(s => s.fecha <= filterFechaFin);
-        }
-
-        return filtered;
-    }
-
-    /**
-     * View solicitud comments
-     */
-    async viewSolicitudComments(solicitudId) {
-        const modal = document.createElement('div');
-        modal.className = 'modal';
-        modal.style.display = 'flex';
-        modal.id = 'modal-comentarios-solicitud';
-        
-        modal.innerHTML = `
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3>Comentarios de Solicitud</h3>
-                    <button class="modal-close" onclick="this.closest('.modal').remove()">&times;</button>
-                </div>
-                <div class="modal-body">
-                    <div id="comments-container-${solicitudId}"></div>
-                </div>
-            </div>
-        `;
-
-        document.body.appendChild(modal);
-        await solicitudesEnhancements.renderComments(solicitudId, `comments-container-${solicitudId}`);
-
-        // Setup filter listeners
-        const filterEstado = document.getElementById('solicitudes-filter-estado');
-        const filterTipo = document.getElementById('solicitudes-filter-tipo');
-        const filterFechaInicio = document.getElementById('solicitudes-filter-fecha-inicio');
-        const filterFechaFin = document.getElementById('solicitudes-filter-fecha-fin');
-
-        [filterEstado, filterTipo, filterFechaInicio, filterFechaFin].forEach(filter => {
-            if (filter) {
-                filter.addEventListener('change', () => this.loadSolicitudes());
-            }
-        });
-    }
-
-    /**
-     * Load admin panel
-     */
-    async loadAdminPanel() {
-        await this.loadAdminStats();
-        await this.loadAdminSolicitudes();
-        await this.loadEmpleados();
-        this.setupAdminTabs();
-        this.setupEmpleadoForm();
-    }
-
-    /**
-     * Setup admin tabs
-     */
-    setupAdminTabs() {
-        const tabs = document.querySelectorAll('.admin-tab');
-        tabs.forEach(tab => {
-            tab.addEventListener('click', () => {
-                const tabName = tab.getAttribute('data-tab');
-                
-                // Remove active class from all tabs
-                tabs.forEach(t => t.classList.remove('active'));
-                tab.classList.add('active');
-                
-                // Hide all tab contents
-                document.querySelectorAll('.admin-tab-content').forEach(content => {
-                    content.style.display = 'none';
-                });
-                
-                // Show selected tab content
-                const content = document.getElementById(`admin-tab-${tabName}`);
-                if (content) {
-                    content.style.display = 'block';
-                    
-                    if (tabName === 'empleados') {
-                        this.loadEmpleados();
-                    }
-                }
-            });
-        });
-    }
-
-    /**
-     * Setup empleado form
-     */
-    async setupEmpleadoForm() {
-        const btnNuevoEmpleado = document.getElementById('btn-nuevo-empleado');
-        if (btnNuevoEmpleado) {
-            btnNuevoEmpleado.addEventListener('click', () => {
-                this.abrirModalEmpleado();
-            });
-        }
-
-        const btnGenerarCodigo = document.getElementById('btn-generar-codigo');
-        if (btnGenerarCodigo) {
-            btnGenerarCodigo.addEventListener('click', async () => {
-                const codigoInput = document.getElementById('empleado-codigo-personal');
-                if (codigoInput) {
-                    try {
-                        const codigo = await this.generarCodigoUnico();
-                        codigoInput.value = codigo;
-                    } catch (error) {
-                        showNotification('Error al generar código', 'error');
-                    }
-                }
-            });
-        }
-
-        const formEmpleado = document.getElementById('form-empleado');
-        if (formEmpleado) {
-            formEmpleado.addEventListener('submit', async (e) => {
-                e.preventDefault();
-                await this.crearEmpleado();
-            });
-        }
-    }
-
-    /**
-     * Open empleado modal
-     */
-    async abrirModalEmpleado() {
-        const modal = document.getElementById('modal-nuevo-empleado');
-        if (!modal) return;
-
-        // Load departments
-        const deptSelect = document.getElementById('empleado-departamento');
-        if (deptSelect) {
-            const departamentos = await db.getAll('departamentos');
-            deptSelect.innerHTML = '<option value="">Seleccione...</option>' +
-                departamentos.map(d => `<option value="${d.codigo}">${d.nombre}</option>`).join('');
-        }
-
-        // Generate code automatically
-        const codigoInput = document.getElementById('empleado-codigo-personal');
-        if (codigoInput) {
-            try {
-                const codigo = await this.generarCodigoUnico();
-                codigoInput.value = codigo;
-            } catch (error) {
-                showNotification('Error al generar código', 'error');
-            }
-        }
-
-        modal.style.display = 'flex';
-    }
-
-    /**
-     * Create empleado
-     */
-    async crearEmpleado() {
-        try {
-            const nombre = document.getElementById('empleado-nombre').value.trim();
-            const email = document.getElementById('empleado-email').value.trim();
-            const departamento = document.getElementById('empleado-departamento').value;
-            const codigoPersonal = document.getElementById('empleado-codigo-personal').value.trim();
-
-            if (!nombre || !email || !departamento || !codigoPersonal) {
-                showNotification('Por favor complete todos los campos', 'error');
-                return;
-            }
-
-            // Verificar que el email no exista (case-insensitive)
-            const usuarios = await db.getAll('usuarios');
-            const emailExiste = usuarios.some(u => u.email && u.email.toLowerCase() === email.toLowerCase());
-            if (emailExiste) {
-                showNotification('El email ya está registrado. Por favor use otro email.', 'error');
-                return;
-            }
-
-            // Verificar que el código sea único
-            const codigoExiste = usuarios.some(u => u.codigoPersonal && u.codigoPersonal === codigoPersonal);
-            if (codigoExiste) {
-                showNotification('El código personal ya está en uso. Por favor genere uno nuevo.', 'error');
-                // Regenerar código automáticamente
-                try {
-                    const nuevoCodigo = await this.generarCodigoUnico();
-                    document.getElementById('empleado-codigo-personal').value = nuevoCodigo;
-                } catch (error) {
-                    console.error('Error al regenerar código:', error);
-                }
-                return;
-            }
-
-            // Crear usuario/empleado
-            const password = await auth.encryptPassword('temp123'); // Contraseña temporal
-            const empleado = {
-                email,
-                password,
-                nombre,
-                departamento,
-                codigoPersonal,
-                rol: 'usuario',
-                fechaRegistro: new Date().toISOString(),
-                activo: true
-            };
-
-            try {
-                await db.add('usuarios', empleado);
-                await db.addAuditoria('EMPLEADO_CREATE', { email, nombre, codigoPersonal });
-
-                showNotification(`Empleado ${nombre} creado exitosamente. Código: ${codigoPersonal}`, 'success');
-            } catch (dbError) {
-                if (dbError.name === 'ConstraintError' || dbError.message.includes('uniqueness')) {
-                    showNotification('El email ya está registrado en la base de datos. Por favor use otro email.', 'error');
-                    return;
-                }
-                throw dbError;
-            }
-            
-            // Cerrar modal y limpiar form
-            const modal = document.getElementById('modal-nuevo-empleado');
-            if (modal) modal.style.display = 'none';
-            document.getElementById('form-empleado').reset();
-
-            // Recargar lista
-            await this.loadEmpleados();
-        } catch (error) {
-            console.error('Error al crear empleado:', error);
-            showNotification('Error al crear el empleado', 'error');
-        }
-    }
-
-    /**
-     * Load empleados list
-     */
-    async loadEmpleados() {
-        const listaContainer = document.getElementById('empleados-list');
-        if (!listaContainer) return;
-
-        const usuarios = await db.getAll('usuarios');
-        const empleados = usuarios.filter(u => u.codigoPersonal); // Solo empleados con código
-
-        if (empleados.length === 0) {
-            listaContainer.innerHTML = `
-                <div class="empty-state">
-                    <span class="empty-state-icon">👥</span>
-                    <h3>No hay empleados registrados</h3>
-                    <p>Agrega empleados para que puedan firmar comunicados.</p>
-                    <button class="btn btn-primary" onclick="document.getElementById('btn-nuevo-empleado').click()">
-                        Agregar Primer Empleado
-                    </button>
-                </div>
-            `;
-            return;
-        }
-
-        // Obtener departamentos para mostrar nombres
-        const departamentos = await db.getAll('departamentos');
-        const deptMap = new Map(departamentos.map(d => [d.codigo, d.nombre]));
-
-        listaContainer.innerHTML = `
-            <div style="display: grid; gap: 1rem;">
-                ${empleados.map(empleado => {
-                    const deptNombre = deptMap.get(empleado.departamento) || empleado.departamento;
-                    return `
-                        <div class="empleado-card" style="
-                            padding: 1.5rem;
-                            border: 1px solid var(--border-color);
-                            border-radius: 8px;
-                            background: #ffffff;
-                            display: flex;
-                            justify-content: space-between;
-                            align-items: center;
-                        ">
-                            <div style="flex: 1;">
-                                <h4 style="margin: 0 0 0.5rem 0;">${this.escapeHtml(empleado.nombre)}</h4>
-                                <div style="font-size: 0.875rem; color: #6b7280;">
-                                    <div>📧 ${this.escapeHtml(empleado.email)}</div>
-                                    <div>🏢 ${this.escapeHtml(deptNombre)}</div>
-                                    <div style="margin-top: 0.5rem;">
-                                        <strong>Código Personal:</strong> 
-                                        <span style="
-                                            display: inline-block;
-                                            padding: 0.25rem 0.75rem;
-                                            background: #f3f4f6;
-                                            border-radius: 4px;
-                                            font-family: monospace;
-                                            font-weight: 600;
-                                            letter-spacing: 2px;
-                                            color: #1f2937;
-                                        ">${this.escapeHtml(empleado.codigoPersonal)}</span>
-                                    </div>
-                                </div>
-                            </div>
-                            <div style="
-                                padding: 0.5rem 1rem;
-                                border-radius: 6px;
-                                font-weight: 600;
-                                font-size: 0.875rem;
-                                ${empleado.activo ? 'background: #10b981; color: #ffffff;' : 'background: #ef4444; color: #ffffff;'}
-                            ">
-                                ${empleado.activo ? 'ACTIVO' : 'INACTIVO'}
-                            </div>
-                        </div>
-                    `;
-                }).join('')}
-            </div>
-        `;
-    }
-
-    /**
-     * Load admin stats
-     */
-    async loadAdminStats() {
-        const statsGrid = document.getElementById('admin-stats');
-        const solicitudes = await db.getAll('solicitudes');
-        const pendientes = solicitudes.filter(s => s.estado === 'pendiente').length;
-        const aprobadasHoy = solicitudes.filter(s => {
-            const hoy = new Date().toISOString().split('T')[0];
-            return s.estado === 'aprobada' && s.fechaActualizacion?.startsWith(hoy);
-        }).length;
-        const rechazadas = solicitudes.filter(s => s.estado === 'rechazada').length;
-        const usuarios = await db.getAll('usuarios');
-        const activos = usuarios.filter(u => u.activo).length;
-
-        statsGrid.innerHTML = `
-            <div class="stat-card">
-                <h3>${pendientes}</h3>
-                <p>Solicitudes Pendientes</p>
-            </div>
-            <div class="stat-card">
-                <h3>${aprobadasHoy}</h3>
-                <p>Aprobadas Hoy</p>
-            </div>
-            <div class="stat-card">
-                <h3>${rechazadas}</h3>
-                <p>Rechazadas</p>
-            </div>
-            <div class="stat-card">
-                <h3>${activos}</h3>
-                <p>Empleados Activos</p>
-            </div>
-        `;
-    }
-
-    /**
-     * Load admin solicitudes
-     */
-    async loadAdminSolicitudes() {
-        const list = document.getElementById('admin-solicitudes-list');
-        let solicitudes = await db.getAll('solicitudes');
-
-        // Apply filters
-        const filterDept = document.getElementById('admin-filter-departamento')?.value || '';
-        const filterTipo = document.getElementById('admin-filter-tipo')?.value || '';
-        const filterFechaInicio = document.getElementById('admin-filter-fecha-inicio')?.value || '';
-        const filterFechaFin = document.getElementById('admin-filter-fecha-fin')?.value || '';
-        const searchEmpleado = document.getElementById('admin-search-empleado')?.value.toLowerCase() || '';
-
-        if (filterDept) {
-            solicitudes = solicitudes.filter(s => s.departamento === filterDept);
-        }
-        if (filterTipo) {
-            solicitudes = solicitudes.filter(s => s.tipo === filterTipo);
-        }
-        if (filterFechaInicio) {
-            solicitudes = solicitudes.filter(s => s.fecha >= filterFechaInicio);
-        }
-        if (filterFechaFin) {
-            solicitudes = solicitudes.filter(s => s.fecha <= filterFechaFin);
-        }
-        if (searchEmpleado) {
-            solicitudes = solicitudes.filter(s => 
-                s.usuarioNombre?.toLowerCase().includes(searchEmpleado) ||
-                s.usuarioId?.toString().includes(searchEmpleado)
+    static filterDocuments() {
+        const query = document.getElementById('docSearchInput').value.toLowerCase();
+        const depFilter = document.getElementById('docDepFilter').value;
+        let docs = this._cachedDocs;
+
+        // Filtrar por departamento del documento (solo para admins)
+        if (depFilter) docs = docs.filter(d => d.departamento === depFilter);
+        if (query) {
+            docs = docs.filter(d =>
+                d.titulo.toLowerCase().includes(query) ||
+                d.codigo.toLowerCase().includes(query) ||
+                d.tipoNombre.toLowerCase().includes(query) ||
+                d.creadoPorNombre.toLowerCase().includes(query)
             );
         }
+        document.getElementById('docListContainer').innerHTML = this.renderDocList(docs);
+    }
 
-        // Sort by date (newest first)
-        solicitudes.sort((a, b) => b.fechaCreacion - a.fechaCreacion);
+    // ========================================================
+    // VER DOCUMENTO
+    // ========================================================
+    static async renderVerDocumento(docId) {
+        const doc = await DocumentManager.getById(docId);
+        if (!doc) {
+            document.getElementById('contentArea').innerHTML = `
+                <div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Documento no encontrado</h3>
+                <button class="btn btn-primary" onclick="App.navigate('documentos')">Volver</button></div>`;
+            return;
+        }
 
-        if (solicitudes.length === 0) {
-            list.innerHTML = `
-                <div class="empty-state">
-                    <span class="empty-state-icon">🔍</span>
-                    <h3>No se encontraron solicitudes</h3>
-                    <p>No hay solicitudes que coincidan con los filtros seleccionados. Intenta ajustar tus criterios de búsqueda.</p>
+        const dep = DEPARTAMENTOS[doc.departamento];
+        const user = AuthManager.getUser();
+        const allFirmas = doc.firmas ? Object.values(doc.firmas) : [];
+        // En "Firmas Digitales" solo mostrar la firma del encargado (creador del documento)
+        const firmas = allFirmas.filter(f => f.userId === doc.creadoPor);
+        const canSign = !allFirmas.some(f => f.userId === user.id);
+        const content = document.getElementById('contentArea');
+
+        content.innerHTML = `
+            <div style="margin-bottom:16px;">
+                <button class="btn btn-outline btn-sm" onclick="App.navigate('documentos')"><i class="fas fa-arrow-left"></i> Volver</button>
+            </div>
+            <div class="doc-preview">
+                <div class="doc-preview-header" style="background:${dep?.color || 'var(--primary)'};">
+                    <p style="font-size:0.85rem;opacity:0.8;">${dep?.nombre || 'Departamento'} — ${doc.tipoNombre}</p>
+                    <h2>${doc.titulo}</h2>
+                    <span class="doc-preview-code">${doc.codigo}</span>
+                    <p style="font-size:0.8rem;opacity:0.7;margin-top:8px;">Creado por ${doc.creadoPorNombre} • ${formatDateTime(doc.fechaCreacion)}</p>
                 </div>
+                <div class="doc-preview-body">${doc.contenido}</div>
+                <div class="doc-preview-footer">
+                    <h4 style="margin-bottom:12px;"><i class="fas fa-signature" style="margin-right:8px;color:var(--primary);"></i>Firmas Digitales</h4>
+                    ${firmas.length > 0 ? `
+                        <div class="signature-list">
+                            ${firmas.map(f => `
+                                <div class="signature-item">
+                                    <div class="sig-check"><i class="fas fa-check-circle"></i></div>
+                                    <div class="sig-name">${f.nombre}</div>
+                                    <div class="sig-role">${ROLES[f.rol]?.nombre || f.rol} — ${DEPARTAMENTOS[f.departamento]?.nombre || ''}</div>
+                                    <div class="sig-date">${formatDateTime(f.fecha)}</div>
+                                    <div class="sig-code">Código: ${f.codigoVerificacion}</div>
+                                    ${f.firmaDibujo ? `
+                                        <div style="margin-top:12px;padding:12px;background:white;border-radius:6px;border:1px solid var(--border);width:100%;max-width:300px;">
+                                            <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:8px;font-weight:600;text-align:center;">Firma manuscrita:</p>
+                                            <div style="text-align:center;">
+                                                <img src="${f.firmaDibujo}" alt="Firma de ${f.nombre}" style="max-width:100%;height:auto;max-height:120px;border-radius:4px;background:white;padding:8px;border:1px dashed var(--primary);display:inline-block;" />
+                                            </div>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    ` : '<p style="color:var(--text-light);font-size:0.88rem;">Aún no hay firmas</p>'}
+
+                    ${canSign ? `
+                        <div class="signature-area" style="margin-top:20px;">
+                            <i class="fas fa-pen-fancy" style="font-size:2rem;color:var(--primary);margin-bottom:10px;display:block;"></i>
+                            <h4>Firmar Documento</h4>
+                            
+                            <!-- Paso 1: Código de verificación del documento -->
+                            <div id="step1Verification" style="margin-bottom:20px;">
+                                <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:15px;">Ingrese el código de verificación del documento</p>
+                                <div style="display:flex;gap:10px;max-width:400px;margin:0 auto;">
+                                    <input type="text" class="form-control" id="signVerCode" placeholder="Código de verificación" style="text-align:center;letter-spacing:2px;text-transform:uppercase;">
+                                    <button class="btn btn-primary" id="btnVerificarCodigo" onclick="App.verifyDocumentCode('${doc.id}')"><i class="fas fa-check"></i> Verificar</button>
+                                </div>
+                                <p style="font-size:0.75rem;color:var(--text-light);margin-top:10px;">
+                                    Código del documento: <strong style="color:var(--primary);letter-spacing:1px;">${doc.verificacionCode}</strong>
+                                </p>
+                            </div>
+
+                            <!-- Paso 2: Código personal y canvas (oculto inicialmente) -->
+                            <div id="step2PersonalCode" style="display:none;margin-bottom:20px;">
+                                <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:15px;">Ingrese su código personal para desbloquear la firma</p>
+                                <div style="display:flex;gap:10px;max-width:400px;margin:0 auto;margin-bottom:15px;">
+                                    <input type="password" class="form-control" id="signPersonalCode" placeholder="Código personal" style="text-align:center;letter-spacing:2px;">
+                                    <button class="btn btn-primary" id="btnDesbloquearFirma" onclick="App.unlockSignatureCanvas('${doc.id}')"><i class="fas fa-unlock"></i> Desbloquear</button>
+                                </div>
+                                <p style="font-size:0.75rem;color:var(--text-light);margin-top:10px;">
+                                    <i class="fas fa-info-circle"></i> Su código personal es privado y se requiere para firmar documentos
+                                </p>
+                            </div>
+
+                            <!-- Paso 3: Canvas de firma (oculto inicialmente) -->
+                            <div id="step3SignatureCanvas" style="display:none;">
+                                <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:15px;text-align:center;">Dibuje su firma en el recuadro</p>
+                                <div style="display:flex;flex-direction:column;align-items:center;gap:15px;">
+                                    <div style="position:relative;border:2px dashed #1565c0;border-radius:8px;background:white;padding:10px;">
+                                        <canvas id="signatureCanvas" width="500" height="200" style="display:block;cursor:crosshair;border-radius:4px;" 
+                                                onmousedown="App.startDrawing(event)" 
+                                                onmousemove="App.draw(event)" 
+                                                onmouseup="App.stopDrawing()" 
+                                                onmouseleave="App.stopDrawing()"
+                                                ontouchstart="App.startDrawing(event)"
+                                                ontouchmove="App.draw(event)"
+                                                ontouchend="App.stopDrawing()"></canvas>
+                                        <div id="canvasLockedOverlay" style="position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;border-radius:4px;pointer-events:none;">
+                                            <div style="text-align:center;color:white;">
+                                                <i class="fas fa-lock" style="font-size:2rem;margin-bottom:10px;"></i>
+                                                <p style="font-size:0.9rem;font-weight:600;">Ingrese su código personal para desbloquear</p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;gap:10px;">
+                                        <button class="btn btn-outline" id="btnLimpiarFirma" onclick="App.clearSignature()" style="display:none;"><i class="fas fa-eraser"></i> Limpiar</button>
+                                        <button class="btn btn-primary" id="btnConfirmarFirma" onclick="App.confirmSignature('${doc.id}')" style="display:none;"><i class="fas fa-check"></i> Confirmar Firma</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ` : `
+                        <div style="margin-top:20px;padding:15px;background:rgba(46,125,50,0.05);border-radius:var(--radius-sm);text-align:center;">
+                            <i class="fas fa-check-circle" style="color:var(--success);margin-right:6px;"></i>
+                            <span style="color:var(--success);font-weight:600;">Ya ha firmado este documento</span>
+                        </div>
+                    `}
+                    <div style="margin-top:20px;text-align:center;" class="no-print">
+                        <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+                            <button class="btn btn-primary btn-sm" onclick="App.generateDocumentPDF('${doc.id}')"><i class="fas fa-file-pdf"></i> Generar PDF</button>
+                            ${(AuthManager.isAdmin() || AuthManager.isEncargado()) ? `
+                                <button class="btn btn-outline btn-sm" onclick="App.navigate('estado-firmas', {id:'${doc.id}'})"><i class="fas fa-clipboard-check"></i> Ver Estado de Firmas</button>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Variables para el canvas de firma
+    static isDrawing = false;
+    static signatureCanvas = null;
+    static signatureCtx = null;
+    static signatureUnlocked = false;
+    static currentDocId = null;
+    static currentVerificationCode = null;
+    static currentPersonalCode = null;
+
+    // Verificar código del documento
+    static async verifyDocumentCode(docId) {
+        const code = document.getElementById('signVerCode').value.toUpperCase().trim();
+        if (!code) { 
+            Toast.error('Error', 'Ingrese el código de verificación'); 
+            return; 
+        }
+
+        const doc = await DocumentManager.getById(docId);
+        if (!doc) {
+            Toast.error('Error', 'Documento no encontrado');
+            return;
+        }
+
+        // Verificar código del documento
+        if (code !== doc.verificacionCode) {
+            Toast.error('Error', 'Código de verificación incorrecto');
+            return;
+        }
+
+        // Guardar código y mostrar paso 2
+        this.currentDocId = docId;
+        this.currentVerificationCode = code;
+        document.getElementById('step1Verification').style.display = 'none';
+        document.getElementById('step2PersonalCode').style.display = 'block';
+        Toast.success('Código verificado', 'Ahora ingrese su código personal');
+    }
+
+    // Desbloquear canvas de firma
+    static async unlockSignatureCanvas(docId) {
+        const personalCode = document.getElementById('signPersonalCode').value.trim();
+        if (!personalCode) {
+            Toast.error('Error', 'Ingrese su código personal');
+            return;
+        }
+
+        const user = AuthManager.getUser();
+        if (!user) {
+            Toast.error('Error', 'Usuario no autenticado');
+            return;
+        }
+
+        // Validar código personal
+        // Si el usuario tiene un código personal en su perfil, validarlo
+        // Si no, usar la contraseña (requiere reautenticación)
+        let isValid = false;
+        
+        if (user.codigoPersonal) {
+            // Validar contra código personal almacenado
+            isValid = personalCode === user.codigoPersonal;
+        } else {
+            // Si no hay código personal, intentar validar contra contraseña
+            // Por seguridad, requerimos reautenticación
+            try {
+                // Reautenticar con la contraseña
+                const email = user.email;
+                const credential = firebase.auth.EmailAuthProvider.credential(email, personalCode);
+                await auth.currentUser.reauthenticateWithCredential(credential);
+                isValid = true;
+            } catch (error) {
+                isValid = false;
+            }
+        }
+
+        if (!isValid) {
+            Toast.error('Error', 'Código personal incorrecto');
+            document.getElementById('signPersonalCode').value = '';
+            return;
+        }
+
+        // Desbloquear canvas
+        this.currentPersonalCode = personalCode;
+        this.signatureUnlocked = true;
+        document.getElementById('step2PersonalCode').style.display = 'none';
+        document.getElementById('step3SignatureCanvas').style.display = 'block';
+        document.getElementById('canvasLockedOverlay').style.display = 'none';
+        document.getElementById('btnLimpiarFirma').style.display = 'inline-block';
+        document.getElementById('btnConfirmarFirma').style.display = 'inline-block';
+        
+        // Inicializar canvas después de un pequeño delay para asegurar que el DOM esté listo
+        setTimeout(() => {
+            this.initSignatureCanvas();
+        }, 100);
+        
+        Toast.success('Canvas desbloqueado', 'Puede dibujar su firma ahora');
+    }
+
+    // Inicializar canvas de firma
+    static initSignatureCanvas() {
+        const canvas = document.getElementById('signatureCanvas');
+        if (!canvas) return;
+        
+        this.signatureCanvas = canvas;
+        this.signatureCtx = canvas.getContext('2d');
+        
+        // Configurar estilo de dibujo
+        this.signatureCtx.strokeStyle = '#000000';
+        this.signatureCtx.lineWidth = 2;
+        this.signatureCtx.lineCap = 'round';
+        this.signatureCtx.lineJoin = 'round';
+        
+        // Ajustar tamaño del canvas para pantallas pequeñas
+        const container = canvas.parentElement;
+        if (container && window.innerWidth < 600) {
+            const maxWidth = container.clientWidth - 40; // Padding
+            canvas.width = Math.min(500, maxWidth);
+            canvas.style.width = canvas.width + 'px';
+            canvas.style.height = '200px';
+        }
+    }
+
+    // Iniciar dibujo
+    static startDrawing(event) {
+        if (!this.signatureUnlocked || !this.signatureCtx) return;
+        
+        event.preventDefault();
+        this.isDrawing = true;
+        const canvas = this.signatureCanvas;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        let x, y;
+        if (event.touches) {
+            x = (event.touches[0].clientX - rect.left) * scaleX;
+            y = (event.touches[0].clientY - rect.top) * scaleY;
+        } else {
+            x = (event.clientX - rect.left) * scaleX;
+            y = (event.clientY - rect.top) * scaleY;
+        }
+        
+        this.signatureCtx.beginPath();
+        this.signatureCtx.moveTo(x, y);
+    }
+
+    // Dibujar
+    static draw(event) {
+        if (!this.isDrawing || !this.signatureUnlocked || !this.signatureCtx) return;
+        
+        event.preventDefault();
+        const canvas = this.signatureCanvas;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        
+        let x, y;
+        if (event.touches) {
+            x = (event.touches[0].clientX - rect.left) * scaleX;
+            y = (event.touches[0].clientY - rect.top) * scaleY;
+        } else {
+            x = (event.clientX - rect.left) * scaleX;
+            y = (event.clientY - rect.top) * scaleY;
+        }
+        
+        this.signatureCtx.lineTo(x, y);
+        this.signatureCtx.stroke();
+    }
+
+    // Detener dibujo
+    static stopDrawing() {
+        this.isDrawing = false;
+    }
+
+    // Limpiar firma
+    static clearSignature() {
+        if (!this.signatureCtx) return;
+        this.signatureCtx.clearRect(0, 0, this.signatureCanvas.width, this.signatureCanvas.height);
+    }
+
+    // Confirmar y enviar firma
+    static async confirmSignature(docId) {
+        if (!this.signatureUnlocked || !this.signatureCanvas) {
+            Toast.error('Error', 'Debe desbloquear el canvas y dibujar su firma');
+            return;
+        }
+
+        // Verificar que haya algo dibujado
+        const imageData = this.signatureCtx.getImageData(0, 0, this.signatureCanvas.width, this.signatureCanvas.height);
+        let hasDrawing = false;
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            // Verificar si hay píxeles no transparentes (canal alpha > 0)
+            if (imageData.data[i + 3] > 0) {
+                hasDrawing = true;
+                break;
+            }
+        }
+
+        if (!hasDrawing) {
+            Toast.error('Error', 'Debe dibujar su firma antes de confirmar');
+            return;
+        }
+
+        // Capturar imagen del canvas
+        const signatureImage = this.signatureCanvas.toDataURL('image/png');
+
+        const btn = document.getElementById('btnConfirmarFirma');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Firmando...';
+
+        // Enviar firma
+        const result = await DocumentManager.signDocument(
+            docId, 
+            AuthManager.getUser().id, 
+            this.currentVerificationCode,
+            this.currentPersonalCode,
+            signatureImage
+        );
+
+        if (result.success) {
+            Toast.success('Documento firmado', `Código de su firma: ${result.firma.codigoVerificacion}`);
+            // Resetear variables
+            this.signatureUnlocked = false;
+            this.currentDocId = null;
+            this.currentVerificationCode = null;
+            this.currentPersonalCode = null;
+            this.navigate('ver-documento', { id: docId });
+        } else {
+            Toast.error('Error', result.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check"></i> Confirmar Firma';
+        }
+    }
+
+    // Función antigua (mantener para compatibilidad)
+    static async handleSignDocument(docId) {
+        // Redirigir al nuevo flujo
+        this.verifyDocumentCode(docId);
+    }
+
+    // Generar PDF del documento
+    static async generateDocumentPDF(docId) {
+        const doc = await DocumentManager.getById(docId);
+        if (!doc) {
+            Toast.error('Error', 'Documento no encontrado');
+            return;
+        }
+
+        Toast.info('Generando PDF', 'Por favor espere...');
+        // Siempre generar con firmas (el parámetro includeSignature ya no se usa, siempre muestra todas)
+        const result = await PDFGenerator.generatePDFFromHTML(doc, true);
+        
+        if (result.success) {
+            Toast.success('PDF generado', `Archivo: ${result.fileName}`);
+        } else {
+            Toast.error('Error', result.message || 'No se pudo generar el PDF');
+        }
+    }
+
+    // Generar PDF con firma específica
+    static async generatePDFWithSignature(docId, userId) {
+        const doc = await DocumentManager.getById(docId);
+        if (!doc) {
+            Toast.error('Error', 'Documento no encontrado');
+            return;
+        }
+
+        const firmas = doc.firmas ? Object.values(doc.firmas) : [];
+        const signatureData = firmas.find(f => f.userId === userId);
+        
+        if (!signatureData) {
+            Toast.error('Error', 'Firma no encontrada');
+            return;
+        }
+
+        Toast.info('Generando PDF', 'Por favor espere...');
+        const result = await PDFGenerator.generatePDFFromHTML(doc, true, signatureData);
+        
+        if (result.success) {
+            Toast.success('PDF generado', `Archivo: ${result.fileName}`);
+        } else {
+            Toast.error('Error', result.message || 'No se pudo generar el PDF');
+        }
+    }
+
+    // ========================================================
+    // ESTADO DE FIRMAS
+    // ========================================================
+    static async renderEstadoFirmas(docId) {
+        if (!AuthManager.isAdmin() && !AuthManager.isEncargado()) {
+            document.getElementById('contentArea').innerHTML = `
+                <div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso Denegado</h3><p>No tiene permisos</p></div>
             `;
             return;
         }
 
-        list.innerHTML = solicitudes.map(s => {
-            let estadoClass = 'yellow';
-            if (s.estado === 'aprobada') {
-                estadoClass = 'green';
-            } else if (s.estado === 'rechazada') {
-                estadoClass = 'red';
-            } else if (s.estado === 'en_revision') {
-                estadoClass = 'yellow'; // Same color as pendiente
-            }
-            return `
-                <div class="admin-solicitud-card solicitud-${s.estado}" data-id="${s.id}">
-                    <div class="solicitud-header">
-                        <div>
-                            <h4>${this.getSolicitudTipoLabel(s.tipo)}</h4>
-                            <p class="solicitud-empleado">${s.usuarioNombre || 'Usuario'} - ${s.departamento}</p>
-                        </div>
-                        <span class="badge-${estadoClass}">${s.estado === 'en_revision' ? 'EN REVISIÓN' : s.estado.toUpperCase()}</span>
-                    </div>
-                    <div class="solicitud-preview">
-                        ${this.renderSolicitudDetails(s)}
-                    </div>
-                    <div class="solicitud-footer">
-                        <span>${this.formatDate(s.fecha)}</span>
-                        <button class="btn btn-sm btn-primary" onclick="window.app.viewSolicitudDetalle(${s.id})">Ver Detalle</button>
-                    </div>
-                </div>
+        const doc = await DocumentManager.getById(docId);
+        if (!doc) {
+            document.getElementById('contentArea').innerHTML = `
+                <div class="empty-state"><i class="fas fa-exclamation-triangle"></i><h3>Documento no encontrado</h3>
+                <button class="btn btn-primary" onclick="App.navigate('documentos')">Volver</button></div>
             `;
+            return;
+        }
+
+        const firmas = doc.firmas ? Object.values(doc.firmas) : [];
+        const firmasRequeridas = doc.firmasRequeridas || [];
+        const allUsers = await AuthManager.getAllUsers();
+        
+        // Obtener usuarios requeridos
+        const usuariosRequeridos = firmasRequeridas.map(userId => {
+            const user = allUsers.find(u => u.id === userId);
+            const hasSigned = firmas.some(f => f.userId === userId);
+            return {
+                user: user,
+                hasSigned: hasSigned,
+                firma: hasSigned ? firmas.find(f => f.userId === userId) : null
+            };
+        }).filter(item => item.user); // Filtrar usuarios que no existen
+
+        const content = document.getElementById('contentArea');
+        content.innerHTML = `
+            <div style="margin-bottom:16px;">
+                <button class="btn btn-outline btn-sm" onclick="App.navigate('ver-documento', {id:'${docId}'})"><i class="fas fa-arrow-left"></i> Volver al Documento</button>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-clipboard-check" style="margin-right:8px;color:var(--primary);"></i>Estado de Firmas</h3>
+                    <button class="btn btn-primary btn-sm" onclick="App.generateDocumentPDF('${docId}')"><i class="fas fa-file-pdf"></i> Generar PDF General</button>
+                </div>
+                <div class="card-body">
+                    <div style="margin-bottom:20px;">
+                        <h4 style="margin-bottom:10px;">${doc.titulo}</h4>
+                        <p style="color:var(--text-secondary);font-size:0.9rem;">Código: ${doc.codigo}</p>
+                    </div>
+
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px;">
+                        <div style="padding:15px;background:rgba(46,125,50,0.1);border-radius:var(--radius-sm);border-left:4px solid var(--success);">
+                            <div style="font-size:2rem;font-weight:bold;color:var(--success);">${firmas.length}</div>
+                            <div style="color:var(--text-secondary);font-size:0.9rem;">Firmas recibidas</div>
+                        </div>
+                        <div style="padding:15px;background:rgba(245,127,23,0.1);border-radius:var(--radius-sm);border-left:4px solid var(--warning);">
+                            <div style="font-size:2rem;font-weight:bold;color:var(--warning);">${Math.max(0, firmasRequeridas.length - firmas.length)}</div>
+                            <div style="color:var(--text-secondary);font-size:0.9rem;">Firmas pendientes</div>
+                        </div>
+                    </div>
+
+                    <h4 style="margin-bottom:15px;margin-top:30px;">Firmantes Requeridos</h4>
+                    ${usuariosRequeridos.length > 0 ? `
+                        <div class="table-container">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Empleado</th>
+                                        <th>Rol</th>
+                                        <th>Departamento</th>
+                                        <th>Estado</th>
+                                        <th>Fecha de Firma</th>
+                                        <th>Acciones</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${usuariosRequeridos.map(item => {
+                                        const user = item.user;
+                                        const dep = DEPARTAMENTOS[user.departamento];
+                                        return `
+                                            <tr>
+                                                <td>
+                                                    <div style="display:flex;align-items:center;gap:10px;">
+                                                        <div class="user-avatar-sm" style="background:${dep?.color || 'var(--primary)'};">
+                                                            ${(user.nombre[0] + user.apellido[0]).toUpperCase()}
+                                                        </div>
+                                                        <div>
+                                                            <strong>${user.nombre} ${user.apellido}</strong>
+                                                            <br><small style="color:var(--text-light);">${user.email}</small>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td><span class="role-badge ${user.rol}">${ROLES[user.rol]?.nombre || user.rol}</span></td>
+                                                <td><span class="dep-chip" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-building'}"></i> ${dep?.nombre || 'N/A'}</span></td>
+                                                <td>
+                                                    ${item.hasSigned ? `
+                                                        <span class="status-badge aprobada"><i class="fas fa-check-circle"></i> Firmado</span>
+                                                    ` : `
+                                                        <span class="status-badge pendiente"><i class="fas fa-clock"></i> Pendiente</span>
+                                                    `}
+                                                </td>
+                                                <td>
+                                                    ${item.hasSigned && item.firma ? formatDateTime(item.firma.fecha) : '<span style="color:var(--text-light);">-</span>'}
+                                                </td>
+                                                <td>
+                                                    ${item.hasSigned && item.firma ? `
+                                                        <button class="btn btn-sm btn-primary" onclick="App.generatePDFWithSignature('${docId}', '${item.firma.userId}')">
+                                                            <i class="fas fa-file-pdf"></i> PDF con Firma
+                                                        </button>
+                                                    ` : '<span style="color:var(--text-light);font-size:0.85rem;">Sin firma</span>'}
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    ` : `
+                        <div class="empty-state">
+                            <i class="fas fa-info-circle"></i>
+                            <h3>No hay firmantes requeridos</h3>
+                            <p>Este documento no tiene firmantes requeridos asignados</p>
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }
+
+    // ========================================================
+    // SOLICITUDES
+    // ========================================================
+    static async renderSolicitudes() {
+        const user = AuthManager.getUser();
+        const requests = (await RequestManager.getByUser(user.id)).sort((a, b) => new Date(b.fechaSolicitud) - new Date(a.fechaSolicitud));
+        this._cachedRequests = requests;
+
+        const content = document.getElementById('contentArea');
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-clipboard-list" style="margin-right:8px;color:var(--primary);"></i>Mis Solicitudes</h3>
+                    <button class="btn btn-primary btn-sm" onclick="App.navigate('nueva-solicitud')"><i class="fas fa-plus"></i> Nueva</button>
+                </div>
+                <div class="card-body">
+                    <div class="tabs" id="reqTabs">
+                        <button class="tab active" data-tab="todas" onclick="App.filterRequests('todas')">Todas (${requests.length})</button>
+                        <button class="tab" data-tab="pendiente" onclick="App.filterRequests('pendiente')">Pendientes (${requests.filter(r=>r.estado==='pendiente').length})</button>
+                        <button class="tab" data-tab="aprobada" onclick="App.filterRequests('aprobada')">Aprobadas (${requests.filter(r=>r.estado==='aprobada').length})</button>
+                        <button class="tab" data-tab="rechazada" onclick="App.filterRequests('rechazada')">Rechazadas (${requests.filter(r=>r.estado==='rechazada').length})</button>
+                    </div>
+                    <div id="reqListContainer">${this.renderRequestList(requests)}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    static _cachedRequests = [];
+
+    static renderRequestList(requests) {
+        if (requests.length === 0) {
+            return `<div class="empty-state"><i class="fas fa-clipboard-list"></i><h3>No hay solicitudes</h3><p>Aún no has realizado ninguna solicitud</p>
+                <button class="btn btn-primary btn-sm" onclick="App.navigate('nueva-solicitud')"><i class="fas fa-plus"></i> Nueva</button></div>`;
+        }
+
+        return requests.map(req => {
+            const datos = req.datos || {};
+            let datesHtml = '';
+            if (datos.fecha_inicio && datos.fecha_fin) {
+                const days = RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin);
+                datesHtml = `<div class="request-dates">
+                    <div class="date-item"><label>Inicio</label><span>${formatDate(datos.fecha_inicio)}</span></div>
+                    <div class="arrow"><i class="fas fa-arrow-right"></i></div>
+                    <div class="date-item"><label>Fin</label><span>${formatDate(datos.fecha_fin)}</span></div>
+                    <span class="request-days-badge"><i class="fas fa-calendar-day"></i> ${days} día(s)</span>
+                </div>`;
+            } else if (datos.fecha) {
+                datesHtml = `<div class="request-dates">
+                    <div class="date-item"><label>Fecha</label><span>${formatDate(datos.fecha)}</span></div>
+                    ${datos.hora_ingreso ? `<div class="date-item"><label>Hora ingreso</label><span>${datos.hora_ingreso}</span></div>` : ''}
+                    ${datos.hora_salida ? `<div class="date-item"><label>Hora salida</label><span>${datos.hora_salida}</span></div>` : ''}
+                </div>`;
+            }
+
+            return `<div class="request-card status-${req.estado}">
+                <div class="request-header">
+                    <h4><i class="${TIPOS_SOLICITUD[req.tipo]?.icono || 'fas fa-file'}" style="margin-right:8px;color:${TIPOS_SOLICITUD[req.tipo]?.color || 'var(--primary)'};"></i>${req.tipoNombre}</h4>
+                    <span class="status-badge ${req.estado}"><i class="fas fa-${req.estado === 'pendiente' ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${req.estado.charAt(0).toUpperCase() + req.estado.slice(1)}</span>
+                </div>
+                ${datesHtml}
+                ${req.observaciones ? `<p style="font-size:0.85rem;color:var(--text-secondary);padding:10px;background:var(--bg-main);border-radius:var(--radius-sm);border-left:3px solid var(--primary);margin-bottom:10px;"><strong>Observaciones:</strong> ${req.observaciones}</p>` : ''}
+                ${datos.motivo ? `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px;"><strong>Motivo:</strong> ${datos.motivo}</p>` : ''}
+                ${req.justificacion ? `<p style="font-size:0.85rem;padding:10px;background:rgba(245,127,23,0.08);border-radius:var(--radius-sm);border-left:3px solid var(--warning);margin-bottom:10px;"><strong>Respuesta:</strong> ${req.justificacion}</p>` : ''}
+                ${req.respondidoPorNombre ? `<p style="font-size:0.78rem;color:var(--text-light);">Respondido por: ${req.respondidoPorNombre} — ${formatDateTime(req.fechaRespuesta)}</p>` : ''}
+                <p style="font-size:0.78rem;color:var(--text-light);margin-top:5px;">Solicitado: ${formatDateTime(req.fechaSolicitud)}</p>
+            </div>`;
         }).join('');
     }
 
-    /**
-     * View solicitud detail (admin)
-     */
-    async viewSolicitudDetalle(id) {
-        const solicitud = await db.get('solicitudes', id);
-        if (!solicitud) {
-            showNotification('Solicitud no encontrada', 'error');
-            return;
-        }
+    static filterRequests(status) {
+        document.querySelectorAll('#reqTabs .tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`#reqTabs .tab[data-tab="${status}"]`)?.classList.add('active');
+        let requests = this._cachedRequests;
+        if (status !== 'todas') requests = requests.filter(r => r.estado === status);
+        document.getElementById('reqListContainer').innerHTML = this.renderRequestList(requests);
+    }
 
-        // Store current solicitud ID for export
-        this.currentSolicitudId = id;
-
-        const content = document.getElementById('solicitud-detalle-content');
-        const adminActions = document.getElementById('admin-actions');
-        
-        // Get employee signature if exists
-        const firmas = await db.query('firmas', 'solicitudId', id);
-        const firmaEmpleado = firmas.find(f => f.tipo === 'empleado');
-        const firmaAdmin = firmas.find(f => !f.tipo || f.tipo === 'admin');
-        
-        const estadoBadge = solicitud.estado === 'en_revision' ? 'yellow' : solicitud.estado;
-        const estadoText = solicitud.estado === 'en_revision' ? 'EN REVISIÓN' : solicitud.estado.toUpperCase();
-        
+    // ========================================================
+    // NUEVA SOLICITUD
+    // ========================================================
+    static renderNuevaSolicitud() {
+        const content = document.getElementById('contentArea');
         content.innerHTML = `
-            <div class="solicitud-detalle-header">
-                <div class="solicitud-detalle-header-content">
-                    <h3>${this.getSolicitudTipoLabel(solicitud.tipo)}</h3>
-                    <div class="solicitud-detalle-header-meta">
-                        <span><strong>Empleado:</strong> ${solicitud.usuarioNombre || 'N/A'}</span>
-                        <span><strong>Departamento:</strong> ${solicitud.departamento || 'N/A'}</span>
-                        <span><strong>Fecha:</strong> ${this.formatDate(solicitud.fecha)}</span>
-                    </div>
-                </div>
-                <span class="badge-${estadoBadge}">${estadoText}</span>
+            <div style="margin-bottom:16px;">
+                <button class="btn btn-outline btn-sm" onclick="App.navigate('solicitudes')"><i class="fas fa-arrow-left"></i> Volver</button>
             </div>
-            <div class="solicitud-detalle-body">
-                ${this.renderSolicitudDetailsCard(solicitud)}
-                ${firmaEmpleado ? `
-                    <div class="solicitud-info-card" style="grid-column: 1 / -1;">
-                        <div class="solicitud-info-card-header">
-                            <div class="solicitud-info-card-icon">✍️</div>
-                            <div class="solicitud-info-card-title">Firma del Empleado</div>
-                        </div>
-                        <div class="solicitud-firma-display">
-                            <img src="${firmaEmpleado.imagen}" alt="Firma del empleado" style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; background: white;">
-                            <p style="font-size: 12px; color: var(--secondary-color); margin-top: 8px;">Firmado el ${this.formatDate(firmaEmpleado.fecha)}</p>
-                        </div>
-                    </div>
-                ` : ''}
-                ${solicitud.justificacion ? `
-                    <div class="justificacion-box">
-                        <div class="justificacion-box-header">
-                            <div class="justificacion-box-icon">!</div>
-                            <strong>Justificación del Rechazo</strong>
-                        </div>
-                        <p>${this.escapeHtml(solicitud.justificacion)}</p>
-                    </div>
-                ` : ''}
-                ${firmaAdmin ? `
-                    <div class="solicitud-info-card" style="grid-column: 1 / -1;">
-                        <div class="solicitud-info-card-header">
-                            <div class="solicitud-info-card-icon">✓</div>
-                            <div class="solicitud-info-card-title">Firma del Administrador</div>
-                        </div>
-                        <div class="solicitud-firma-display">
-                            <img src="${firmaAdmin.imagen}" alt="Firma del administrador" style="max-width: 100%; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px; background: white;">
-                            <p style="font-size: 12px; color: var(--secondary-color); margin-top: 8px;">Firmado el ${this.formatDate(firmaAdmin.fecha)}</p>
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-            <div class="solicitud-historial">
-                <div class="solicitud-historial-header">
-                    <div class="solicitud-historial-icon">⏱</div>
-                    <h4>Historial de la Solicitud</h4>
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-plus-circle" style="margin-right:8px;color:var(--primary);"></i>Nueva Solicitud</h3>
                 </div>
-                <ul>
-                    <li>Creada el ${this.formatDate(solicitud.fecha)}</li>
-                    ${solicitud.fechaActualizacion ? `<li>Última actualización: ${this.formatDate(solicitud.fechaActualizacion)}</li>` : ''}
-                    ${solicitud.aprobadoPor ? `<li>Procesada por: ${solicitud.aprobadoPor}</li>` : ''}
-                    ${firmaEmpleado ? `<li>Firmada por el empleado el ${this.formatDate(firmaEmpleado.fecha)}</li>` : ''}
-                    ${firmaAdmin ? `<li>Firmada por el administrador el ${this.formatDate(firmaAdmin.fecha)}</li>` : ''}
-                </ul>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label>Tipo de Solicitud <span class="required">*</span></label>
+                        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-top:8px;" id="reqTypeGrid">
+                            ${Object.keys(TIPOS_SOLICITUD).map(key => {
+                                const tipo = TIPOS_SOLICITUD[key];
+                                return `<div class="req-type-card" data-type="${key}" onclick="App.selectRequestType('${key}')"
+                                    style="padding:20px;border:2px solid var(--border);border-radius:var(--radius-md);text-align:center;cursor:pointer;transition:var(--transition);">
+                                    <i class="${tipo.icono}" style="font-size:1.8rem;color:${tipo.color};margin-bottom:8px;display:block;"></i>
+                                    <h4 style="font-size:0.88rem;">${tipo.nombre}</h4>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                    <div id="reqFormContainer" style="display:none;margin-top:24px;border-top:1px solid var(--border);padding-top:24px;"></div>
+                </div>
+            </div>
+        `;
+    }
+
+    static selectRequestType(type) {
+        document.querySelectorAll('.req-type-card').forEach(c => { c.style.borderColor = 'var(--border)'; c.style.background = ''; });
+        const selected = document.querySelector(`.req-type-card[data-type="${type}"]`);
+        if (selected) { selected.style.borderColor = TIPOS_SOLICITUD[type]?.color || 'var(--primary)'; selected.style.background = 'rgba(21, 101, 192, 0.03)'; }
+
+        const container = document.getElementById('reqFormContainer');
+        container.style.display = 'block';
+        const tipo = TIPOS_SOLICITUD[type];
+        let fieldsHtml = '';
+
+        if (tipo.campos.includes('fecha_inicio') && tipo.campos.includes('fecha_fin')) {
+            fieldsHtml += `<div class="form-row"><div class="form-group"><label>Fecha Inicio <span class="required">*</span></label><input type="date" class="form-control" id="reqFechaInicio" required></div>
+                <div class="form-group"><label>Fecha Fin <span class="required">*</span></label><input type="date" class="form-control" id="reqFechaFin" required></div></div>`;
+        }
+        if (tipo.campos.includes('fecha') && !tipo.campos.includes('fecha_inicio')) {
+            fieldsHtml += `<div class="form-group"><label>Fecha <span class="required">*</span></label><input type="date" class="form-control" id="reqFecha" required></div>`;
+        }
+        if (tipo.campos.includes('hora_ingreso')) fieldsHtml += `<div class="form-group"><label>Hora de Ingreso</label><input type="time" class="form-control" id="reqHoraIngreso"></div>`;
+        if (tipo.campos.includes('hora_salida')) fieldsHtml += `<div class="form-group"><label>Hora de Salida</label><input type="time" class="form-control" id="reqHoraSalida"></div>`;
+        if (tipo.campos.includes('horario_actual')) {
+            fieldsHtml += `<div class="form-row"><div class="form-group"><label>Horario Actual</label><input type="text" class="form-control" id="reqHorarioActual" placeholder="Ej: 8:00 AM - 5:00 PM"></div>
+                <div class="form-group"><label>Horario Solicitado</label><input type="text" class="form-control" id="reqHorarioSolicitado" placeholder="Ej: 9:00 AM - 6:00 PM"></div></div>`;
+        }
+        if (tipo.campos.includes('institucion')) fieldsHtml += `<div class="form-group"><label>Institución</label><input type="text" class="form-control" id="reqInstitucion" placeholder="Nombre de la institución educativa"></div>`;
+        if (tipo.campos.includes('descripcion')) fieldsHtml += `<div class="form-group"><label>Descripción</label><input type="text" class="form-control" id="reqDescripcion" placeholder="Descripción del día festivo"></div>`;
+        if (tipo.campos.includes('motivo')) fieldsHtml += `<div class="form-group"><label>Motivo <span class="required">*</span></label><textarea class="form-control" id="reqMotivo" rows="3" placeholder="Explique el motivo de su solicitud..."></textarea></div>`;
+        fieldsHtml += `<div class="form-group"><label>Observaciones adicionales</label><textarea class="form-control" id="reqObservaciones" rows="2" placeholder="Observaciones opcionales..."></textarea></div>`;
+
+        // Bloque de previsualización para todos los tipos de solicitud
+        const previewHtml = `
+            <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-light);">
+                <h4 style="margin-bottom:8px;font-size:0.8rem;color:var(--text-light);text-transform:uppercase;letter-spacing:0.12em;">
+                    Previsualización de la solicitud
+                </h4>
+                <div id="reqPreviewBox" style="border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;background:#f9fafb;max-height:320px;overflow:auto;">
+                    <pre id="reqPreviewText" style="white-space:pre-wrap;font-family:'Times New Roman', serif;font-size:0.9rem;line-height:1.5;margin:0;"></pre>
+                </div>
+                <p style="margin-top:6px;font-size:0.75rem;color:var(--text-light);">
+                    Este texto es una previsualización. La aprobación o rechazo se realiza desde "Gestionar Solicitudes".
+                </p>
             </div>
         `;
 
-        // Show/hide admin actions
-        // Allow editing for pendiente and en_revision states
-        const editableStates = ['pendiente', 'en_revision'];
-        if (editableStates.includes(solicitud.estado) && auth.isAdmin()) {
-            adminActions.style.display = 'block';
-            signatureManager.clear();
-            
-            // If already in revision, hide the "marcar en revisión" button
-            const btnRevision = document.getElementById('btn-revision');
-            if (btnRevision) {
-                if (solicitud.estado === 'en_revision') {
-                    btnRevision.style.display = 'none';
-                } else {
-                    btnRevision.style.display = 'inline-flex';
-                }
-            }
-        } else {
-            adminActions.style.display = 'none';
-        }
-
-        // Setup action buttons
-        document.getElementById('btn-aprobar').onclick = () => this.aprobarSolicitud(id);
-        document.getElementById('btn-rechazar').onclick = () => this.rechazarSolicitud(id);
-        document.getElementById('btn-revision').onclick = () => this.marcarEnRevision(id);
-
-        // Open modal
-        document.getElementById('modal-solicitud-detalle').style.display = 'flex';
-        setTimeout(() => {
-            signatureManager.init('signature-canvas');
-        }, 100);
-    }
-
-    /**
-     * Approve solicitud
-     */
-    async aprobarSolicitud(id) {
-        const signature = signatureManager.getSignatureData();
-        if (!signature) {
-            showNotification('Debe proporcionar una firma digital', 'error');
-            return;
-        }
-
-        try {
-            const solicitud = await db.get('solicitudes', id);
-            const user = auth.getCurrentUser();
-
-            solicitud.estado = 'aprobada';
-            solicitud.aprobadoPor = user.nombre;
-            solicitud.fechaActualizacion = new Date().toISOString();
-
-            await db.update('solicitudes', solicitud);
-            await signatureManager.saveSignature(id);
-            await db.addAuditoria('SOLICITUD_APROBAR', { solicitudId: id });
-
-            showNotification('Solicitud aprobada exitosamente', 'success');
-            document.getElementById('modal-solicitud-detalle').style.display = 'none';
-            this.loadAdminSolicitudes();
-            this.loadAdminStats();
-        } catch (error) {
-            console.error('Error approving solicitud:', error);
-            showNotification('Error al aprobar la solicitud', 'error');
-        }
-    }
-
-    /**
-     * Reject solicitud
-     */
-    async rechazarSolicitud(id) {
-        const justificacion = document.getElementById('justificacion').value.trim();
-        if (!justificacion) {
-            showNotification('Debe proporcionar una justificación', 'error');
-            return;
-        }
-
-        const signature = signatureManager.getSignatureData();
-        if (!signature) {
-            showNotification('Debe proporcionar una firma digital', 'error');
-            return;
-        }
-
-        try {
-            const solicitud = await db.get('solicitudes', id);
-            const user = auth.getCurrentUser();
-
-            solicitud.estado = 'rechazada';
-            solicitud.justificacion = justificacion;
-            solicitud.aprobadoPor = user.nombre;
-            solicitud.fechaActualizacion = new Date().toISOString();
-
-            await db.update('solicitudes', solicitud);
-            await signatureManager.saveSignature(id);
-            await db.addAuditoria('SOLICITUD_RECHAZAR', { solicitudId: id, justificacion });
-
-            showNotification('Solicitud rechazada', 'success');
-            document.getElementById('modal-solicitud-detalle').style.display = 'none';
-            document.getElementById('justificacion').value = '';
-            this.loadAdminSolicitudes();
-            this.loadAdminStats();
-        } catch (error) {
-            console.error('Error rejecting solicitud:', error);
-            showNotification('Error al rechazar la solicitud', 'error');
-        }
-    }
-
-    /**
-     * Mark solicitud in review
-     */
-    async marcarEnRevision(id) {
-        try {
-            const solicitud = await db.get('solicitudes', id);
-            solicitud.estado = 'en_revision';
-            solicitud.fechaActualizacion = new Date().toISOString();
-
-            await db.update('solicitudes', solicitud);
-            await db.addAuditoria('SOLICITUD_REVISION', { solicitudId: id });
-
-            showNotification('Solicitud marcada en revisión', 'success');
-            
-            // Reload the modal with updated state to refresh the UI
-            await this.viewSolicitudDetalle(id);
-            
-            this.loadAdminSolicitudes();
-            this.loadAdminStats();
-        } catch (error) {
-            console.error('Error marking in review:', error);
-            showNotification('Error al marcar la solicitud', 'error');
-        }
-    }
-
-    /**
-     * Render solicitud details
-     */
-    renderSolicitudDetails(solicitud, full = false) {
-        let html = '';
-        
-        if (solicitud.tipo === 'permiso') {
-            html = `
-                <p><strong>Fecha Inicio:</strong> ${this.formatDate(solicitud.fechaInicio || '')}</p>
-                <p><strong>Fecha Fin:</strong> ${this.formatDate(solicitud.fechaFin || '')}</p>
-                <p><strong>Días:</strong> ${solicitud.dias || 0}</p>
-                <p><strong>Motivo:</strong> ${this.escapeHtml(solicitud.motivo || '')}</p>
-            `;
-        } else if (solicitud.tipo === 'vacaciones') {
-            html = `
-                <p><strong>Fecha Inicio:</strong> ${this.formatDate(solicitud.fechaInicio || '')}</p>
-                <p><strong>Fecha Fin:</strong> ${this.formatDate(solicitud.fechaFin || '')}</p>
-                <p><strong>Días:</strong> ${solicitud.dias || 0}</p>
-                ${solicitud.observaciones ? `<p><strong>Observaciones:</strong> ${this.escapeHtml(solicitud.observaciones)}</p>` : ''}
-            `;
-        } else if (solicitud.tipo === 'otra') {
-            html = `
-                <p><strong>Título:</strong> ${this.escapeHtml(solicitud.titulo || '')}</p>
-                <p><strong>Descripción:</strong> ${this.escapeHtml(solicitud.descripcion || '')}</p>
-            `;
-        }
-
-        return html;
-    }
-
-    /**
-     * Render solicitud details in card format
-     */
-    renderSolicitudDetailsCard(solicitud) {
-        let html = '';
-        
-        if (solicitud.tipo === 'permiso') {
-            html = `
-                <div class="solicitud-info-card">
-                    <div class="solicitud-info-card-header">
-                        <div class="solicitud-info-card-icon">📅</div>
-                        <div class="solicitud-info-card-title">Periodo Solicitado</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Fecha de Inicio</div>
-                        <div class="solicitud-info-value">${this.formatDate(solicitud.fechaInicio || '')}</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Fecha de Fin</div>
-                        <div class="solicitud-info-value">${this.formatDate(solicitud.fechaFin || '')}</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Total de Días</div>
-                        <div class="solicitud-info-value solicitud-info-value-large">${solicitud.dias || 0} días</div>
-                    </div>
+        container.innerHTML = `
+            <h3 style="margin-bottom:20px;"><i class="${tipo.icono}" style="margin-right:8px;color:${tipo.color};"></i>${tipo.nombre}</h3>
+            <form id="reqForm" onsubmit="App.handleCreateRequest(event, '${type}')">
+                ${fieldsHtml}
+                <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px;">
+                    <button type="button" class="btn btn-outline" onclick="App.navigate('solicitudes')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-lg" id="btnEnviarReq"><i class="fas fa-paper-plane"></i> Enviar Solicitud</button>
                 </div>
-                <div class="solicitud-info-card">
-                    <div class="solicitud-info-card-header">
-                        <div class="solicitud-info-card-icon">📝</div>
-                        <div class="solicitud-info-card-title">Motivo</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-value">${this.escapeHtml(solicitud.motivo || 'No especificado')}</div>
-                    </div>
-                </div>
-            `;
-        } else if (solicitud.tipo === 'vacaciones') {
-            html = `
-                <div class="solicitud-info-card">
-                    <div class="solicitud-info-card-header">
-                        <div class="solicitud-info-card-icon">🏖️</div>
-                        <div class="solicitud-info-card-title">Periodo de Vacaciones</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Fecha de Inicio</div>
-                        <div class="solicitud-info-value">${this.formatDate(solicitud.fechaInicio || '')}</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Fecha de Fin</div>
-                        <div class="solicitud-info-value">${this.formatDate(solicitud.fechaFin || '')}</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Total de Días</div>
-                        <div class="solicitud-info-value solicitud-info-value-large">${solicitud.dias || 0} días</div>
-                    </div>
-                </div>
-                ${solicitud.observaciones ? `
-                    <div class="solicitud-info-card">
-                        <div class="solicitud-info-card-header">
-                            <div class="solicitud-info-card-icon">💬</div>
-                            <div class="solicitud-info-card-title">Observaciones</div>
-                        </div>
-                        <div class="solicitud-info-item">
-                            <div class="solicitud-info-value">${this.escapeHtml(solicitud.observaciones)}</div>
-                        </div>
-                    </div>
-                ` : ''}
-            `;
-        } else if (solicitud.tipo === 'otra') {
-            html = `
-                <div class="solicitud-info-card">
-                    <div class="solicitud-info-card-header">
-                        <div class="solicitud-info-card-icon">📋</div>
-                        <div class="solicitud-info-card-title">Detalles de la Solicitud</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Título</div>
-                        <div class="solicitud-info-value">${this.escapeHtml(solicitud.titulo || 'N/A')}</div>
-                    </div>
-                    <div class="solicitud-info-item">
-                        <div class="solicitud-info-label">Descripción</div>
-                        <div class="solicitud-info-value">${this.escapeHtml(solicitud.descripcion || 'No especificada')}</div>
-                    </div>
-                </div>
-            `;
-        }
+            </form>
+            ${previewHtml}
+        `;
 
-        return html;
+        // Inicializar y actualizar previsualización para todos los tipos
+        const previewInputIds = ['reqFechaInicio', 'reqFechaFin', 'reqFecha', 'reqHoraIngreso', 'reqHoraSalida', 'reqHorarioActual', 'reqHorarioSolicitado', 'reqInstitucion', 'reqDescripcion', 'reqMotivo', 'reqObservaciones'];
+        const update = () => App.updateRequestPreview(type);
+        previewInputIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('input', update);
+            if (el) el.addEventListener('change', update);
+        });
+        App.updateRequestPreview(type);
     }
 
-    /**
-     * Get solicitud tipo label
-     */
-    getSolicitudTipoLabel(tipo) {
-        const labels = {
-            'permiso': 'Permiso sin Goce de Salario',
-            'vacaciones': 'Solicitud de Vacaciones',
-            'otra': 'Otra Solicitud'
+    static async handleCreateRequest(e, type) {
+        e.preventDefault();
+        const datos = {};
+        const fields = {
+            reqFechaInicio: 'fecha_inicio', reqFechaFin: 'fecha_fin', reqFecha: 'fecha',
+            reqHoraIngreso: 'hora_ingreso', reqHoraSalida: 'hora_salida',
+            reqHorarioActual: 'horario_actual', reqHorarioSolicitado: 'horario_solicitado',
+            reqInstitucion: 'institucion', reqDescripcion: 'descripcion', reqMotivo: 'motivo'
         };
-        return labels[tipo] || tipo;
+
+        Object.keys(fields).forEach(elId => {
+            const el = document.getElementById(elId);
+            if (el && el.value) datos[fields[elId]] = el.value;
+        });
+
+        const observaciones = document.getElementById('reqObservaciones')?.value || '';
+
+        // Guardar datos temporalmente y abrir flujo de firma (código + firma dibujada)
+        this._pendingRequest = {
+            tipo: type,
+            datos,
+            observaciones
+        };
+
+        this.openRequestSignatureModal();
     }
 
-    /**
-     * Export comunicado to PDF
-     */
+    // Abrir modal para firmar la solicitud (código personal + firma dibujada)
+    static openRequestSignatureModal() {
+        const user = AuthManager.getUser();
+        if (!user) {
+            Toast.error('Error', 'Usuario no autenticado');
+            return;
+        }
 
-    /**
-     * Format date - handles date strings (YYYY-MM-DD) and ISO strings correctly
-     */
-    formatDate(dateString) {
-        if (!dateString) return '';
-        
-        // If it's a date string in format YYYY-MM-DD, parse it directly
-        if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-            const [year, month, day] = dateString.split('-').map(Number);
-            const date = new Date(year, month - 1, day); // month is 0-indexed
-            return date.toLocaleDateString('es-ES', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
+        if (!this._pendingRequest || !this._pendingRequest.tipo) {
+            Toast.error('Error', 'No hay datos de la solicitud para firmar');
+            return;
+        }
+
+        this.showModal('Firmar Solicitud', `
+            <div>
+                <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;">
+                    Antes de enviar la solicitud, debe confirmar su identidad con su <strong>código personal</strong> y dibujar su firma, igual que en los documentos oficiales.
+                </p>
+
+                <!-- Paso 1: Código personal -->
+                <div id="reqStepPersonalCode" style="margin-bottom:20px;">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:10px;">
+                        Ingrese su código personal para desbloquear la firma
+                    </p>
+                    <div style="display:flex;gap:10px;max-width:400px;margin:0 auto;margin-bottom:8px;">
+                        <input type="password" class="form-control" id="reqSignPersonalCode" placeholder="Código personal" style="text-align:center;letter-spacing:2px;">
+                        <button class="btn btn-primary" id="btnReqDesbloquearFirma" onclick="App.unlockRequestSignatureCanvas()">
+                            <i class="fas fa-unlock"></i> Desbloquear
+                        </button>
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-light);margin-top:4px;text-align:center;">
+                        <i class="fas fa-info-circle"></i> El código personal se configura en su perfil y es requerido para firmar.
+                    </p>
+                </div>
+
+                <!-- Paso 2: Canvas de firma -->
+                <div id="reqStepSignatureCanvas" style="display:none;">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:12px;text-align:center;">
+                        Dibuje su firma en el recuadro para confirmar la solicitud
+                    </p>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+                        <div style="position:relative;border:2px dashed #1565c0;border-radius:8px;background:white;padding:10px;">
+                            <canvas id="signatureCanvas" width="500" height="200" style="display:block;cursor:crosshair;border-radius:4px;"
+                                onmousedown="App.startDrawing(event)"
+                                onmousemove="App.draw(event)"
+                                onmouseup="App.stopDrawing()"
+                                onmouseleave="App.stopDrawing()"
+                                ontouchstart="App.startDrawing(event)"
+                                ontouchmove="App.draw(event)"
+                                ontouchend="App.stopDrawing()"></canvas>
+                        </div>
+                        <div style="display:flex;gap:10px;justify-content:center;">
+                            <button class="btn btn-outline" id="btnReqLimpiarFirma" onclick="App.clearSignature()">
+                                <i class="fas fa-eraser"></i> Limpiar
+                            </button>
+                            <button class="btn btn-primary" id="btnReqConfirmarFirma" onclick="App.confirmRequestSignature()">
+                                <i class="fas fa-check"></i> Firmar y Enviar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `);
+
+        // Inicializar estado de firma para solicitudes
+        this.signatureUnlocked = false;
+        this.currentPersonalCode = null;
+    }
+
+    // Desbloquear canvas de firma para solicitudes (valida código personal)
+    static async unlockRequestSignatureCanvas() {
+        const personalCode = document.getElementById('reqSignPersonalCode').value.trim();
+        if (!personalCode) {
+            Toast.error('Error', 'Ingrese su código personal');
+            return;
+        }
+
+        const user = AuthManager.getUser();
+        if (!user) {
+            Toast.error('Error', 'Usuario no autenticado');
+            return;
+        }
+
+        let isValid = false;
+        if (user.codigoPersonal) {
+            isValid = personalCode === user.codigoPersonal;
+        } else {
+            try {
+                const email = user.email;
+                const credential = firebase.auth.EmailAuthProvider.credential(email, personalCode);
+                await auth.currentUser.reauthenticateWithCredential(credential);
+                isValid = true;
+            } catch (error) {
+                isValid = false;
+            }
+        }
+
+        if (!isValid) {
+            Toast.error('Error', 'Código personal incorrecto');
+            document.getElementById('reqSignPersonalCode').value = '';
+            return;
+        }
+
+        this.currentPersonalCode = personalCode;
+        this.signatureUnlocked = true;
+        document.getElementById('reqStepPersonalCode').style.display = 'none';
+        document.getElementById('reqStepSignatureCanvas').style.display = 'block';
+
+        // Inicializar canvas
+        setTimeout(() => {
+            this.initSignatureCanvas();
+        }, 100);
+
+        Toast.success('Código válido', 'Puede dibujar su firma ahora');
+    }
+
+    // Confirmar firma de la solicitud y crear la solicitud en Firebase
+    static async confirmRequestSignature() {
+        if (!this.signatureUnlocked || !this.signatureCanvas) {
+            Toast.error('Error', 'Debe desbloquear el canvas y dibujar su firma');
+            return;
+        }
+
+        // Verificar que haya algo dibujado
+        const imageData = this.signatureCtx.getImageData(0, 0, this.signatureCanvas.width, this.signatureCanvas.height);
+        let hasDrawing = false;
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            if (imageData.data[i + 3] > 0) {
+                hasDrawing = true;
+                break;
+            }
+        }
+
+        if (!hasDrawing) {
+            Toast.error('Error', 'Debe dibujar su firma antes de confirmar');
+            return;
+        }
+
+        if (!this._pendingRequest || !this._pendingRequest.tipo) {
+            Toast.error('Error', 'No hay datos de la solicitud para enviar');
+            return;
+        }
+
+        const signatureImage = this.signatureCanvas.toDataURL('image/png');
+
+        const btn = document.getElementById('btnReqConfirmarFirma');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando...';
+
+        const user = AuthManager.getUser();
+        const firma = {
+            userId: user.id,
+            nombre: user.nombre + ' ' + user.apellido,
+            rol: user.rol,
+            departamento: user.departamento,
+            fecha: new Date().toISOString(),
+            codigoPersonal: this.currentPersonalCode || null,
+            firmaDibujo: signatureImage
+        };
+
+        try {
+            const request = await RequestManager.create({
+                tipo: this._pendingRequest.tipo,
+                datos: this._pendingRequest.datos,
+                observaciones: this._pendingRequest.observaciones,
+                firma
             });
+
+            Toast.success('Solicitud enviada', `Su solicitud de ${request.tipoNombre} ha sido enviada`);
+            this._pendingRequest = null;
+            this.signatureUnlocked = false;
+            this.currentPersonalCode = null;
+            this.closeModal();
+            this.navigate('solicitudes');
+        } catch (error) {
+            console.error('Error creando solicitud con firma:', error);
+            Toast.error('Error', 'No se pudo enviar la solicitud');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check"></i> Firmar y Enviar';
         }
-        
-        // For ISO strings, parse in local timezone
-        const date = new Date(dateString);
-        // Check if date is valid
-        if (isNaN(date.getTime())) {
-            return dateString; // Return as-is if invalid
+    }
+
+    // Previsualización de la solicitud (todos los tipos); lee el formulario y usa buildRequestText
+    static updateRequestPreview(type) {
+        const previewEl = document.getElementById('reqPreviewText');
+        if (!previewEl) return;
+
+        const user = AuthManager.getUser() || {};
+        const fieldMap = {
+            reqFechaInicio: 'fecha_inicio', reqFechaFin: 'fecha_fin', reqFecha: 'fecha',
+            reqHoraIngreso: 'hora_ingreso', reqHoraSalida: 'hora_salida',
+            reqHorarioActual: 'horario_actual', reqHorarioSolicitado: 'horario_solicitado',
+            reqInstitucion: 'institucion', reqDescripcion: 'descripcion', reqMotivo: 'motivo',
+            reqObservaciones: 'observaciones'
+        };
+        const datos = {};
+        Object.keys(fieldMap).forEach(elId => {
+            const el = document.getElementById(elId);
+            if (el && el.value) datos[fieldMap[elId]] = el.value;
+        });
+
+        const fakeReq = {
+            tipo: type,
+            tipoNombre: TIPOS_SOLICITUD[type]?.nombre || type,
+            datos,
+            solicitanteNombre: user.nombre && user.apellido ? `${user.nombre} ${user.apellido}` : '[Nombre del empleado]',
+            departamento: user.departamento,
+            fechaSolicitud: new Date().toISOString()
+        };
+
+        previewEl.textContent = this.buildRequestText(fakeReq);
+    }
+
+    // ========================================================
+    // GESTIONAR SOLICITUDES
+    // ========================================================
+    static async renderGestionarSolicitudes() {
+        const user = AuthManager.getUser();
+        let requests;
+        if (AuthManager.isAdmin()) {
+            requests = await RequestManager.getAll();
+        } else {
+            requests = await RequestManager.getByDepartment(user.departamento);
         }
+        requests = requests.sort((a, b) => new Date(b.fechaSolicitud) - new Date(a.fechaSolicitud));
+        this._cachedMgrRequests = requests;
+
+        const content = document.getElementById('contentArea');
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-tasks" style="margin-right:8px;color:var(--primary);"></i>Gestionar Solicitudes</h3>
+                </div>
+                <div class="card-body">
+                    <div class="tabs" id="mgrTabs">
+                        <button class="tab active" data-tab="pendiente" onclick="App.filterMgrRequests('pendiente')">Pendientes (${requests.filter(r=>r.estado==='pendiente').length})</button>
+                        <button class="tab" data-tab="todas" onclick="App.filterMgrRequests('todas')">Todas (${requests.length})</button>
+                        <button class="tab" data-tab="aprobada" onclick="App.filterMgrRequests('aprobada')">Aprobadas (${requests.filter(r=>r.estado==='aprobada').length})</button>
+                        <button class="tab" data-tab="rechazada" onclick="App.filterMgrRequests('rechazada')">Rechazadas (${requests.filter(r=>r.estado==='rechazada').length})</button>
+                    </div>
+                    <div id="mgrReqContainer">${this.renderManageRequestList(requests.filter(r => r.estado === 'pendiente'))}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    static _cachedMgrRequests = [];
+
+    static renderManageRequestList(requests) {
+        if (requests.length === 0) {
+            return `<div class="empty-state"><i class="fas fa-check-circle"></i><h3>No hay solicitudes</h3><p>No hay solicitudes en esta categoría</p></div>`;
+        }
+
+        return requests.map(req => {
+            const datos = req.datos || {};
+            const isPending = req.estado === 'pendiente';
+            let datesHtml = '';
+            if (datos.fecha_inicio && datos.fecha_fin) {
+                const days = RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin);
+                datesHtml = `<div class="request-dates"><div class="date-item"><label>Inicio</label><span>${formatDate(datos.fecha_inicio)}</span></div>
+                    <div class="arrow"><i class="fas fa-arrow-right"></i></div>
+                    <div class="date-item"><label>Fin</label><span>${formatDate(datos.fecha_fin)}</span></div>
+                    <span class="request-days-badge"><i class="fas fa-calendar-day"></i> ${days} día(s)</span></div>`;
+            } else if (datos.fecha) {
+                datesHtml = `<div class="request-dates"><div class="date-item"><label>Fecha</label><span>${formatDate(datos.fecha)}</span></div>
+                    ${datos.hora_ingreso ? `<div class="date-item"><label>Hora</label><span>${datos.hora_ingreso}</span></div>` : ''}
+                    ${datos.hora_salida ? `<div class="date-item"><label>Hora</label><span>${datos.hora_salida}</span></div>` : ''}</div>`;
+            }
+
+            // Texto completo del permiso sin goce salarial para encargados
+            let detalleHtml = '';
+            if (req.tipo === 'sin_goce') {
+                const user = AuthManager.getUser() || {};
+                const empresa = APP_CONFIG?.appName || 'La empresa';
+                const nombreCompleto = req.solicitanteNombre || 'Empleado';
+                const depNombre = DEPARTAMENTOS[req.departamento]?.nombre || 'su departamento';
+
+                const fechaInicioTxt = datos.fecha_inicio ? formatDate(datos.fecha_inicio) : '_____';
+                const fechaFinTxt = datos.fecha_fin ? formatDate(datos.fecha_fin) : '_____';
+                const diasTxt = (datos.fecha_inicio && datos.fecha_fin)
+                    ? `${RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin)} día(s)`
+                    : '_____';
+                const motivoTxt = datos.motivo || '______________________________';
+                const fechaSolicitudTxt = formatDate(req.fechaSolicitud);
+
+                const texto = `SOLICITUD DE PERMISO SIN GOCE SALARIAL
+
+Yo, ${nombreCompleto}, quien laboro para ${empresa}, adscrito(a) al departamento de ${depNombre}, por este medio solicito formalmente un permiso sin goce de salario.
+
+El permiso se solicita para el período comprendido desde el día ${fechaInicioTxt} hasta el día ${fechaFinTxt}, para un total de ${diasTxt} calendario, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.
+
+Motivo del permiso:
+${motivoTxt}
+
+Manifiesto que entiendo y acepto que durante este período no devengaré salario ni beneficios salariales asociados, y que el puesto de trabajo, así como las obligaciones y responsabilidades, se mantienen vigentes al término del presente permiso, de acuerdo con la normativa laboral costarricense y la normativa interna de ${empresa}.
+
+Declaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.
+
+En Costa Rica, a los ${fechaSolicitudTxt}.`;
+
+                detalleHtml = `<details style="margin-top:12px;">
+                    <summary style="cursor:pointer;font-size:0.82rem;color:var(--primary);">
+                        <i class="fas fa-file-alt" style="margin-right:4px;"></i> Ver texto completo del permiso
+                    </summary>
+                    <pre style="white-space:pre-wrap;font-family:'Times New Roman',serif;font-size:0.86rem;margin-top:8px;padding:10px;background:var(--bg-main);border-radius:var(--radius-sm);border:1px solid var(--border-light);">
+${texto}</pre>
+                </details>`;
+            }
+
+            return `<div class="request-card status-${req.estado}">
+                <div class="request-header">
+                    <div>
+                        <h4><i class="${TIPOS_SOLICITUD[req.tipo]?.icono || 'fas fa-file'}" style="margin-right:8px;color:${TIPOS_SOLICITUD[req.tipo]?.color || 'var(--primary)'};"></i>${req.tipoNombre}</h4>
+                        <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">Solicitado por: <strong>${req.solicitanteNombre}</strong> — ${DEPARTAMENTOS[req.departamento]?.nombre || ''}</p>
+                    </div>
+                    <span class="status-badge ${req.estado}"><i class="fas fa-${req.estado === 'pendiente' ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${req.estado.charAt(0).toUpperCase() + req.estado.slice(1)}</span>
+                </div>
+                ${datesHtml}
+                ${req.observaciones ? `<p style="font-size:0.85rem;color:var(--text-secondary);padding:10px;background:var(--bg-main);border-radius:var(--radius-sm);border-left:3px solid var(--primary);margin-bottom:10px;"><strong>Observaciones:</strong> ${req.observaciones}</p>` : ''}
+                ${datos.motivo ? `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px;"><strong>Motivo:</strong> ${datos.motivo}</p>` : ''}
+                ${detalleHtml}
+                ${req.justificacion ? `<p style="font-size:0.85rem;padding:10px;background:rgba(245,127,23,0.08);border-radius:var(--radius-sm);border-left:3px solid var(--warning);margin-bottom:10px;"><strong>Respuesta:</strong> ${req.justificacion}</p>` : ''}
+                ${req.respondidoPorNombre ? `<p style="font-size:0.78rem;color:var(--text-light);">Respondido por: ${req.respondidoPorNombre} — ${formatDateTime(req.fechaRespuesta)}</p>` : ''}
+                <p style="font-size:0.78rem;color:var(--text-light);margin-top:5px;">Solicitado: ${formatDateTime(req.fechaSolicitud)}</p>
+                ${(isPending || req.estado === 'aprobada') ? `
+                <div style="display:flex;gap:10px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-light);flex-wrap:wrap;">
+                    ${isPending ? `
+                        <button class="btn btn-success btn-sm" onclick="App.handleSignAndApproveRequest('${req.id}')"><i class="fas fa-pen-nib"></i> Firmar y Aprobar</button>
+                        <button class="btn btn-danger btn-sm" onclick="App.handleRejectRequest('${req.id}')"><i class="fas fa-times"></i> Rechazar</button>
+                    ` : ''}
+                    ${req.estado === 'aprobada' ? `
+                        <button class="btn btn-primary btn-sm" onclick="App.generateRequestPDF('${req.id}')"><i class="fas fa-file-pdf"></i> Generar PDF</button>
+                    ` : ''}
+                </div>` : ''}
+            </div>`;
+        }).join('');
+    }
+
+    static filterMgrRequests(status) {
+        document.querySelectorAll('#mgrTabs .tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`#mgrTabs .tab[data-tab="${status}"]`)?.classList.add('active');
+        let requests = this._cachedMgrRequests;
+        if (status !== 'todas') requests = requests.filter(r => r.estado === status);
+        document.getElementById('mgrReqContainer').innerHTML = this.renderManageRequestList(requests);
+    }
+
+    static handleApproveRequest(id) {
+        this.showModal('Aprobar Solicitud', `
+            <form onsubmit="App.confirmApprove(event, '${id}')">
+                <p style="margin-bottom:16px;">¿Está seguro de que desea <strong style="color:var(--success);">aprobar</strong> esta solicitud?</p>
+                <div class="form-group"><label>Comentario (opcional)</label><textarea class="form-control" id="approveComment" rows="3" placeholder="Agregue un comentario..."></textarea></div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-success" id="btnConfirmApprove"><i class="fas fa-check"></i> Confirmar</button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async confirmApprove(e, id) {
+        e.preventDefault();
+        const btn = document.getElementById('btnConfirmApprove');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        const comment = document.getElementById('approveComment').value;
+        await RequestManager.approve(id, comment);
+        this.closeModal();
+        Toast.success('Solicitud aprobada', 'La solicitud ha sido aprobada exitosamente');
+        this.navigate('gestionar-solicitudes');
+    }
+
+    static handleRejectRequest(id) {
+        this.showModal('Rechazar Solicitud', `
+            <form onsubmit="App.confirmReject(event, '${id}')">
+                <p style="margin-bottom:16px;">¿Está seguro de que desea <strong style="color:var(--danger);">rechazar</strong> esta solicitud?</p>
+                <div class="form-group"><label>Justificación <span class="required">*</span></label><textarea class="form-control" id="rejectReason" rows="3" placeholder="Explique el motivo del rechazo..." required></textarea></div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-danger" id="btnConfirmReject"><i class="fas fa-times"></i> Confirmar</button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async confirmReject(e, id) {
+        e.preventDefault();
+        const reason = document.getElementById('rejectReason').value;
+        if (!reason.trim()) { Toast.error('Error', 'Debe ingresar una justificación'); return; }
+
+        const btn = document.getElementById('btnConfirmReject');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        await RequestManager.reject(id, reason);
+        this.closeModal();
+        Toast.error('Solicitud rechazada', 'La solicitud ha sido rechazada');
+        this.navigate('gestionar-solicitudes');
+    }
+
+    // ========================================================
+    // FIRMA DE SOLICITUDES POR ADMINISTRADOR
+    // ========================================================
+    static _currentSignReqId = null;
+
+    static async handleSignAndApproveRequest(id) {
+        this._currentSignReqId = id;
+        const req = this._cachedMgrRequests.find(r => r.id === id) || await RequestManager.getById(id);
+        if (!req) { Toast.error('Error', 'No se encontró la solicitud'); return; }
+
+        const nombreCompleto = req.solicitanteNombre || 'Empleado';
+        const textoPermiso = this.buildRequestText(req);
+
+        const firmaEmpleadoHtml = req.firma?.firmaDibujo
+            ? `<img src="${req.firma.firmaDibujo}" alt="Firma empleado" style="max-width:100%;max-height:80px;display:block;margin:0 auto;" />`
+            : `<p style="color:#999;font-size:11px;font-style:italic;text-align:center;margin:0;">Sin firma registrada</p>`;
+
+        this.showModal(`Firmar y Aprobar: ${req.tipoNombre || 'Solicitud'}`, `
+            <div>
+                <div style="margin-bottom:18px;">
+                    <h4 style="font-size:0.75rem;color:var(--text-light);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Documento de solicitud</h4>
+                    <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:12px 14px;background:#f9fafb;max-height:190px;overflow:auto;">
+                        <pre style="white-space:pre-wrap;font-family:'Times New Roman',serif;font-size:0.82rem;line-height:1.5;margin:0;">${textoPermiso}</pre>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:18px;">
+                    <h4 style="font-size:0.75rem;color:var(--text-light);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Firma del solicitante</h4>
+                    <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:12px;background:#f9fafb;display:flex;flex-direction:column;align-items:center;gap:4px;">
+                        ${firmaEmpleadoHtml}
+                        <p style="font-size:0.82rem;color:var(--text-secondary);margin:6px 0 0;font-weight:600;">${req.firma?.nombre || nombreCompleto}</p>
+                        ${req.firma?.fecha ? `<p style="font-size:0.75rem;color:var(--text-light);margin:2px 0 0;">${formatDateTime(req.firma.fecha)}</p>` : ''}
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-bottom:16px;">
+                    <label style="font-size:0.85rem;">Comentario de aprobación (opcional)</label>
+                    <textarea class="form-control" id="adminApproveComment" rows="2" placeholder="Comentario..."></textarea>
+                </div>
+
+                <div id="adminSignStep1" style="margin-bottom:20px;">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:10px;">Ingrese su <strong>código personal</strong> para desbloquear la firma</p>
+                    <div style="display:flex;gap:10px;max-width:420px;margin:0 auto;">
+                        <input type="password" class="form-control" id="adminSignCode" placeholder="Código personal" style="text-align:center;letter-spacing:2px;">
+                        <button class="btn btn-primary" onclick="App.unlockAdminSignCanvas()">
+                            <i class="fas fa-unlock"></i> Desbloquear
+                        </button>
+                    </div>
+                    <p style="font-size:0.75rem;color:var(--text-light);margin-top:6px;text-align:center;">
+                        <i class="fas fa-info-circle"></i> El código personal se configura en su perfil.
+                    </p>
+                </div>
+
+                <div id="adminSignStep2" style="display:none;">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:12px;text-align:center;">Dibuje su firma como administrador para aprobar la solicitud</p>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
+                        <div style="position:relative;border:2px dashed #1565c0;border-radius:8px;background:white;padding:10px;">
+                            <canvas id="signatureCanvas" width="500" height="180" style="display:block;cursor:crosshair;border-radius:4px;"
+                                onmousedown="App.startDrawing(event)"
+                                onmousemove="App.draw(event)"
+                                onmouseup="App.stopDrawing()"
+                                onmouseleave="App.stopDrawing()"
+                                ontouchstart="App.startDrawing(event)"
+                                ontouchmove="App.draw(event)"
+                                ontouchend="App.stopDrawing()"></canvas>
+                        </div>
+                        <div style="display:flex;gap:10px;justify-content:center;">
+                            <button class="btn btn-outline" onclick="App.clearSignature()"><i class="fas fa-eraser"></i> Limpiar</button>
+                            <button class="btn btn-success" id="btnConfirmAdminSign" onclick="App.confirmAdminSign()">
+                                <i class="fas fa-check"></i> Firmar y Aprobar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `, true);
+
+        this.signatureUnlocked = false;
+        this.currentPersonalCode = null;
+    }
+
+    static buildRequestText(req) {
+        const datos = req.datos || {};
+        const empresa = APP_CONFIG?.appName || 'La empresa';
+        const nombre = req.solicitanteNombre || 'Empleado';
+        const dep = DEPARTAMENTOS[req.departamento]?.nombre || 'su departamento';
+        const fSolicitud = formatDate(req.fechaSolicitud);
+        const motivo = datos.motivo || '______________________________';
+        const fi = datos.fecha_inicio ? formatDate(datos.fecha_inicio) : '_____';
+        const ff = datos.fecha_fin ? formatDate(datos.fecha_fin) : '_____';
+        const dias = (datos.fecha_inicio && datos.fecha_fin)
+            ? `${RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin)} día(s)` : '_____';
+
+        switch (req.tipo) {
+            case 'sin_goce':
+                return `SOLICITUD DE PERMISO SIN GOCE SALARIAL\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente un permiso sin goce de salario.\n\nEl permiso se solicita para el período comprendido desde el día ${fi} hasta el día ${ff}, para un total de ${dias} calendario, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.\n\nMotivo del permiso:\n${motivo}\n\nManifiesto que entiendo y acepto que durante este período no devengaré salario ni beneficios salariales asociados, y que el puesto de trabajo, así como las obligaciones y responsabilidades, se mantienen vigentes al término del presente permiso, de acuerdo con la normativa laboral costarricense y la normativa interna de ${empresa}.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+
+            case 'vacaciones': {
+                const obs = datos.observaciones ? `\n\nObservaciones:\n${datos.observaciones}` : '';
+                return `SOLICITUD DE DISFRUTE DE VACACIONES\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente el disfrute de mis vacaciones acumuladas.\n\nEl período de vacaciones solicitado comprende desde el día ${fi} hasta el día ${ff}, para un total de ${dias} calendario, de conformidad con el artículo 59 del Código de Trabajo de la República de Costa Rica y las disposiciones aplicables en materia de descanso remunerado. Entiendo que el disfrute de vacaciones es un derecho irrenunciable reconocido por la legislación laboral costarricense.${obs}\n\nManifiesto que he coordinado con mi jefatura inmediata la cobertura de mis funciones durante el período de ausencia, a fin de no afectar la continuidad de los servicios de ${empresa}. Asimismo, me comprometo a dejar debidamente documentadas las labores pendientes y a estar disponible en la medida de lo posible para cualquier consulta urgente que pudiera surgir durante mi ausencia.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            case 'ingreso_posterior': {
+                const fecha = datos.fecha ? formatDate(datos.fecha) : '_____';
+                const hora = datos.hora_ingreso || '_____';
+                return `SOLICITUD DE INGRESO POSTERIOR\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio notifico formalmente que el día ${fecha} realizaré mi ingreso de forma posterior al horario habitual establecido.\n\nHora de ingreso: ${hora}\n\nMotivo:\n${motivo}\n\nManifiesto que tomaré las medidas necesarias para compensar el tiempo de ausencia de conformidad con las políticas internas de ${empresa} y lo dispuesto en el Código de Trabajo. Entiendo que los ingresos posteriores deben ser debidamente justificados y que la empresa podrá solicitar los comprobantes que estime convenientes. Me comprometo a cumplir con la jornada laboral correspondiente y a no afectar el normal desarrollo de las actividades del departamento.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            case 'salida_anticipada': {
+                const fecha = datos.fecha ? formatDate(datos.fecha) : '_____';
+                const hora = datos.hora_salida || '_____';
+                return `SOLICITUD DE SALIDA ANTICIPADA\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente autorización para retirarme antes del horario laboral establecido.\n\nFecha: ${fecha}\nHora de salida anticipada: ${hora}\n\nMotivo:\n${motivo}\n\nManifiesto que coordinaré con mi jefatura la compensación del tiempo correspondiente de conformidad con las políticas internas de ${empresa}. Entiendo que la salida anticipada queda sujeta a las necesidades del servicio y al criterio del superior inmediato. Me comprometo a dejar en orden las labores bajo mi responsabilidad y a reponer las horas no trabajadas según lo acordado con la empresa.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            case 'cambio_horario': {
+                const fecha = datos.fecha ? formatDate(datos.fecha) : '_____';
+                const actual = datos.horario_actual || '_____';
+                const solicitado = datos.horario_solicitado || '_____';
+                return `SOLICITUD DE CAMBIO DE HORARIO\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente la modificación de mi horario de trabajo.\n\nHorario actual:      ${actual}\nHorario solicitado:  ${solicitado}\nFecha de aplicación: ${fecha}\n\nMotivo del cambio:\n${motivo}\n\nManifiesto que el cambio de horario solicitado no afectará negativamente el desempeño de mis funciones ni la prestación de los servicios de ${empresa}, y me comprometo a cumplir con la totalidad de las horas laborales establecidas. Entiendo que la modificación del horario queda sujeta a la aprobación de la jefatura y a las necesidades operativas de la organización. Una vez aprobado, me comprometo a cumplir de manera puntual y responsable el nuevo horario.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            case 'estudio': {
+                const inst = datos.institucion || '_____';
+                return `SOLICITUD DE PERMISO DE ESTUDIO\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente un permiso para actividades de formación académica.\n\nInstitución educativa: ${inst}\nPeríodo: desde el día ${fi} hasta el día ${ff}, para un total de ${dias}.\n\nMotivo:\n${motivo}\n\nEl presente permiso se solicita de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica respecto a permisos de capacitación y estudio, así como las políticas internas de ${empresa}. Manifiesto que la formación que recibiré contribuirá a mi desarrollo profesional y, en consecuencia, al mejor desempeño de mis labores. Me comprometo a coordinar con mi jefatura las fechas de ausencia y a no afectar el normal desarrollo de las actividades del departamento.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            case 'dias_festivos': {
+                const fecha = datos.fecha ? formatDate(datos.fecha) : '_____';
+                const desc = datos.descripcion || '_____';
+                return `NOTIFICACIÓN DE DÍA FESTIVO\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio registro formalmente la siguiente ausencia por día festivo, de conformidad con el calendario oficial de días feriados de la República de Costa Rica y con lo dispuesto en el Código de Trabajo en materia de descansos obligatorios.\n\nFecha: ${fecha}\nDescripción: ${desc}\n\nLa presente notificación tiene como fin dejar constancia formal del día festivo señalado, según lo establecido en el Código de Trabajo y la normativa laboral vigente. Entiendo que en los días feriados de carácter nacional el trabajador tiene derecho al descanso remunerado, salvo las excepciones previstas en la ley. Dejo constancia de que he informado con la debida anticipación a mi jefatura para que se tomen las medidas organizativas que correspondan.\n\nDeclaro que la información aquí consignada es veraz.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            default:
+                return `${req.tipoNombre || req.tipo}\n\nSolicitante: ${nombre}\nDepartamento: ${dep}\nFecha: ${fSolicitud}`;
+        }
+    }
+
+    static async unlockAdminSignCanvas() {
+        const personalCode = document.getElementById('adminSignCode').value.trim();
+        if (!personalCode) { Toast.error('Error', 'Ingrese su código personal'); return; }
+
+        const user = AuthManager.getUser();
+        if (!user) { Toast.error('Error', 'Usuario no autenticado'); return; }
+
+        let isValid = false;
+        if (user.codigoPersonal) {
+            isValid = personalCode === user.codigoPersonal;
+        } else {
+            try {
+                const credential = firebase.auth.EmailAuthProvider.credential(user.email, personalCode);
+                await auth.currentUser.reauthenticateWithCredential(credential);
+                isValid = true;
+            } catch (e) { isValid = false; }
+        }
+
+        if (!isValid) {
+            Toast.error('Error', 'Código personal incorrecto');
+            document.getElementById('adminSignCode').value = '';
+            return;
+        }
+
+        this.currentPersonalCode = personalCode;
+        this.signatureUnlocked = true;
+        document.getElementById('adminSignStep1').style.display = 'none';
+        document.getElementById('adminSignStep2').style.display = 'block';
+        setTimeout(() => this.initSignatureCanvas(), 100);
+        Toast.success('Código válido', 'Puede dibujar su firma ahora');
+    }
+
+    static async confirmAdminSign() {
+        if (!this.signatureUnlocked || !this.signatureCanvas) {
+            Toast.error('Error', 'Debe desbloquear el canvas y dibujar su firma');
+            return;
+        }
+
+        const imageData = this.signatureCtx.getImageData(0, 0, this.signatureCanvas.width, this.signatureCanvas.height);
+        let hasDrawing = false;
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            if (imageData.data[i + 3] > 0) { hasDrawing = true; break; }
+        }
+        if (!hasDrawing) { Toast.error('Error', 'Debe dibujar su firma antes de confirmar'); return; }
+
+        const signatureImage = this.signatureCanvas.toDataURL('image/png');
+        const user = AuthManager.getUser();
+        const firmaAdmin = {
+            userId: user.id,
+            nombre: user.nombre + ' ' + user.apellido,
+            rol: user.rol,
+            fecha: new Date().toISOString(),
+            firmaDibujo: signatureImage
+        };
+
+        const comment = document.getElementById('adminApproveComment')?.value || '';
+        const btn = document.getElementById('btnConfirmAdminSign');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
+
+        const result = await RequestManager.approve(this._currentSignReqId, comment, firmaAdmin);
+        if (result) {
+            Toast.success('Aprobada', 'Solicitud firmada y aprobada exitosamente');
+            this.closeModal();
+            this.signatureUnlocked = false;
+            this.currentPersonalCode = null;
+            this._currentSignReqId = null;
+            this.navigate('gestionar-solicitudes');
+        } else {
+            Toast.error('Error', 'No se pudo aprobar la solicitud');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-check"></i> Firmar y Aprobar';
+        }
+    }
+
+    static async generateRequestPDF(id) {
+        const req = this._cachedMgrRequests.find(r => r.id === id) || await RequestManager.getById(id);
+        if (!req) { Toast.error('Error', 'No se encontró la solicitud'); return; }
+        Toast.info('Generando PDF', 'Por favor espere...');
+        const result = await PDFGenerator.generateRequestPDF(req);
+        if (!result.success) Toast.error('Error', 'No se pudo generar el PDF');
+    }
+
+    // ========================================================
+    // USUARIOS (ADMIN)
+    // ========================================================
+    static async renderUsuarios() {
+        if (!AuthManager.isAdmin()) {
+            document.getElementById('contentArea').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso Denegado</h3><p>No tiene permisos</p></div>`;
+            return;
+        }
+
+        const content = document.getElementById('contentArea');
         
-        return date.toLocaleDateString('es-ES', {
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            timeZone: 'UTC'
+        // Mostrar loading mientras se cargan los usuarios
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
+                    <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                </div>
+                <div class="card-body">
+                    <div style="text-align:center;padding:40px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:var(--primary);"></i>
+                        <p style="margin-top:16px;color:var(--text-secondary);">Cargando usuarios...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        try {
+            const users = await AuthManager.getAllUsers();
+            console.log('Usuarios obtenidos:', users);
+
+            if (!users || users.length === 0) {
+            content.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="empty-state">
+                            <i class="fas fa-users" style="font-size:3rem;color:var(--text-light);margin-bottom:16px;"></i>
+                            <h3>No hay usuarios registrados</h3>
+                            <p>Comience creando el primer usuario del sistema</p>
+                            <button class="btn btn-primary" onclick="App.showCreateUserModal()" style="margin-top:16px;"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Crear Usuario</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+                return;
+            }
+
+            content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
+                    <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus"></i> Nuevo Usuario</button>
+                </div>
+                <div class="card-body no-padding">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Departamento</th><th>Código Firma</th><th>Estado</th><th>Acciones</th></tr></thead>
+                            <tbody>
+                                ${users.map(u => {
+                                    const dep = DEPARTAMENTOS[u.departamento];
+                                    const initials = (u.nombre[0] + u.apellido[0]).toUpperCase();
+                                    const hasCode = u.codigoPersonal ? true : false;
+                                    return `<tr>
+                                        <td><div style="display:flex;align-items:center;gap:10px;">
+                                            <div class="user-avatar-sm" style="background:${dep?.color || 'var(--primary)'};">${initials}</div>
+                                            <div><strong>${u.nombre} ${u.apellido}</strong><br><small style="color:var(--text-light);">${u.id.substring(0,12)}...</small></div>
+                                        </div></td>
+                                        <td>${u.email}</td>
+                                        <td><span class="role-badge ${u.rol}">${ROLES[u.rol]?.nombre || u.rol}</span></td>
+                                        <td><span class="dep-chip" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-building'}"></i> ${dep?.nombre || 'N/A'}</span></td>
+                                        <td>
+                                            ${hasCode ? 
+                                                `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--success-light);color:var(--success);border-radius:4px;font-size:0.85rem;">
+                                                    <i class="fas fa-check-circle"></i> Configurado
+                                                </span>` : 
+                                                `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--warning-light);color:var(--warning);border-radius:4px;font-size:0.85rem;">
+                                                    <i class="fas fa-exclamation-circle"></i> Sin código
+                                                </span>`
+                                            }
+                                        </td>
+                                        <td><span class="status-badge ${u.activo ? 'aprobada' : 'rechazada'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
+                                        <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                            <button class="btn btn-sm btn-outline" onclick="App.showEditUserModal('${u.id}')" title="Editar"><i class="fas fa-edit"></i></button>
+                                            <button class="btn btn-sm btn-outline" onclick="App.showManageCodeModal('${u.id}')" title="Gestionar código de firma" style="border-color:var(--primary);color:var(--primary);">
+                                                <i class="fas fa-key"></i>
+                                            </button>
+                                            ${u.id !== AuthManager.getUser().id ? `<button class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.handleDeleteUser('${u.id}')" title="Desactivar"><i class="fas fa-ban"></i></button>` : ''}
+                                        </div></td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        } catch (error) {
+            console.error('Error renderizando usuarios:', error);
+            content.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                    </div>
+                    <div class="card-body">
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle" style="font-size:3rem;color:var(--danger);margin-bottom:16px;"></i>
+                            <h3>Error al cargar usuarios</h3>
+                            <p>${error.message || 'Ocurrió un error al obtener los usuarios'}</p>
+                            <button class="btn btn-primary" onclick="App.navigate('usuarios')" style="margin-top:16px;"><i class="fas fa-redo"></i> Reintentar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    static showCreateUserModal() {
+        let depsOpts = '';
+        Object.keys(DEPARTAMENTOS).forEach(key => { depsOpts += `<option value="${key}">${DEPARTAMENTOS[key].nombre}</option>`; });
+
+        this.showModal('Crear Nuevo Usuario', `
+            <form onsubmit="App.handleCreateUser(event)">
+                <div class="form-row">
+                    <div class="form-group"><label>Nombre <span class="required">*</span></label><input type="text" class="form-control" id="newUserNombre" required></div>
+                    <div class="form-group"><label>Apellido <span class="required">*</span></label><input type="text" class="form-control" id="newUserApellido" required></div>
+                </div>
+                <div class="form-group"><label>Email <span class="required">*</span></label><input type="email" class="form-control" id="newUserEmail" required></div>
+                <div class="form-group"><label>Contraseña <span class="required">*</span> (mín. 6 caracteres)</label><input type="password" class="form-control" id="newUserPassword" required minlength="6"></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Rol <span class="required">*</span></label><select class="form-control" id="newUserRol" required><option value="">Seleccionar...</option>
+                        ${Object.keys(ROLES).map(r => `<option value="${r}">${ROLES[r].nombre}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Departamento <span class="required">*</span></label><select class="form-control" id="newUserDep" required><option value="">Seleccionar...</option>${depsOpts}</select></div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnCreateUser"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Crear</button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async handleCreateUser(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btnCreateUser');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
+
+        const userData = {
+            nombre: document.getElementById('newUserNombre').value,
+            apellido: document.getElementById('newUserApellido').value,
+            email: document.getElementById('newUserEmail').value,
+            password: document.getElementById('newUserPassword').value,
+            rol: document.getElementById('newUserRol').value,
+            departamento: document.getElementById('newUserDep').value
+        };
+
+        const result = await AuthManager.createUser(userData);
+
+        if (result.success) {
+            this.closeModal();
+            Toast.success('Usuario creado', `${userData.nombre} ${userData.apellido} ha sido creado`);
+            this.navigate('usuarios');
+        } else {
+            Toast.error('Error', result.message);
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-user-plus"></i> Crear';
+        }
+    }
+
+    static async showEditUserModal(userId) {
+        const user = await AuthManager.getUserById(userId);
+        if (!user) return;
+
+        let depsOpts = '';
+        Object.keys(DEPARTAMENTOS).forEach(key => { depsOpts += `<option value="${key}" ${user.departamento === key ? 'selected' : ''}>${DEPARTAMENTOS[key].nombre}</option>`; });
+
+        this.showModal('Editar Usuario', `
+            <form onsubmit="App.handleEditUser(event, '${userId}')">
+                <div class="form-row">
+                    <div class="form-group"><label>Nombre</label><input type="text" class="form-control" id="editUserNombre" value="${user.nombre}" required></div>
+                    <div class="form-group"><label>Apellido</label><input type="text" class="form-control" id="editUserApellido" value="${user.apellido}" required></div>
+                </div>
+                <div class="form-group"><label>Email</label><input type="email" class="form-control" id="editUserEmail" value="${user.email}" required></div>
+                <div class="form-row">
+                    <div class="form-group"><label>Rol</label><select class="form-control" id="editUserRol" required>
+                        ${Object.keys(ROLES).map(r => `<option value="${r}" ${user.rol === r ? 'selected' : ''}>${ROLES[r].nombre}</option>`).join('')}</select></div>
+                    <div class="form-group"><label>Departamento</label><select class="form-control" id="editUserDep" required>${depsOpts}</select></div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnEditUser"><i class="fas fa-save"></i> Guardar</button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async handleEditUser(e, userId) {
+        e.preventDefault();
+        const btn = document.getElementById('btnEditUser');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        const updates = {
+            nombre: document.getElementById('editUserNombre').value,
+            apellido: document.getElementById('editUserApellido').value,
+            email: document.getElementById('editUserEmail').value,
+            rol: document.getElementById('editUserRol').value,
+            departamento: document.getElementById('editUserDep').value
+        };
+
+        await AuthManager.updateUser(userId, updates);
+        this.closeModal();
+        Toast.success('Actualizado', 'Los cambios han sido guardados');
+        this.updateSidebar();
+        this.navigate('usuarios');
+    }
+
+    static handleDeleteUser(userId) {
+        this.showModal('Desactivar Usuario', `
+            <p style="margin-bottom:20px;">¿Está seguro de que desea <strong style="color:var(--danger);">desactivar</strong> este usuario?</p>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                <button class="btn btn-danger" onclick="App.confirmDeleteUser('${userId}')"><i class="fas fa-ban"></i> Desactivar</button>
+            </div>
+        `);
+    }
+
+    static async confirmDeleteUser(userId) {
+        await AuthManager.deleteUser(userId);
+        this.closeModal();
+        Toast.success('Desactivado', 'El usuario ha sido desactivado');
+        this.navigate('usuarios');
+    }
+
+    static async showManageCodeModal(userId) {
+        const user = await AuthManager.getUserById(userId);
+        if (!user) {
+            Toast.error('Error', 'Usuario no encontrado');
+            return;
+        }
+
+        const hasCode = user.codigoPersonal ? true : false;
+        const codeDisplay = hasCode ? 
+            `<div style="background:var(--success-light);padding:12px;border-radius:6px;margin-bottom:16px;">
+                <p style="margin:0;font-size:0.9rem;color:var(--text-secondary);margin-bottom:8px;">Código actual:</p>
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <code style="font-size:1.2rem;letter-spacing:3px;font-weight:600;color:var(--success);background:white;padding:8px 12px;border-radius:4px;flex:1;text-align:center;">${user.codigoPersonal}</code>
+                    <button class="btn btn-sm btn-outline" onclick="App.copyCodeToClipboard('${user.codigoPersonal}')" title="Copiar">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+            </div>` : 
+            `<div style="background:var(--warning-light);padding:12px;border-radius:6px;margin-bottom:16px;">
+                <p style="margin:0;font-size:0.9rem;color:var(--text-secondary);">
+                    <i class="fas fa-exclamation-circle"></i> Este usuario no tiene un código personal configurado.
+                </p>
+            </div>`;
+
+        this.showModal('Gestionar Código de Firma', `
+            <div style="margin-bottom:20px;">
+                <p style="color:var(--text-secondary);margin-bottom:16px;">
+                    El código personal es necesario para que el usuario pueda firmar documentos. 
+                    Puede generar un código automático o crear uno personalizado.
+                </p>
+                ${codeDisplay}
+            </div>
+            <form onsubmit="App.handleManageCode(event, '${userId}')">
+                <div class="form-group">
+                    <label>Nuevo Código Personal <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="newPersonalCode" 
+                           placeholder="Ingrese o genere un código" 
+                           minlength="4" 
+                           maxlength="20"
+                           required
+                           style="letter-spacing:2px;text-align:center;">
+                    <small style="color:var(--text-light);margin-top:6px;display:block;">
+                        Mínimo 4 caracteres, máximo 20. Solo letras y números.
+                    </small>
+                </div>
+                <div style="display:flex;gap:10px;margin-bottom:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.generateRandomCode()" style="flex:1;">
+                        <i class="fas fa-dice"></i> Generar Aleatorio
+                    </button>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnSaveCode">
+                        <i class="fas fa-save"></i> ${hasCode ? 'Actualizar' : 'Crear'} Código
+                    </button>
+                </div>
+            </form>
+        `);
+
+        // Generar código aleatorio por defecto si no tiene código
+        if (!hasCode) {
+            this.generateRandomCode();
+        }
+    }
+
+    static generateRandomCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Sin I, O, 0, 1 para evitar confusión
+        let code = '';
+        for (let i = 0; i < 6; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        const codeInput = document.getElementById('newPersonalCode');
+        if (codeInput) {
+            codeInput.value = code;
+        }
+    }
+
+    static copyCodeToClipboard(code) {
+        navigator.clipboard.writeText(code).then(() => {
+            Toast.success('Copiado', 'Código copiado al portapapeles');
+        }).catch(() => {
+            Toast.error('Error', 'No se pudo copiar el código');
         });
     }
-    
-    /**
-     * Format date for input fields (YYYY-MM-DD format)
-     */
-    formatDateForInput(dateString) {
-        if (!dateString) return '';
+
+    static async handleManageCode(e, userId) {
+        e.preventDefault();
+        const btn = document.getElementById('btnSaveCode');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+
+        const code = document.getElementById('newPersonalCode').value.trim().toUpperCase();
         
-        // If it's already in YYYY-MM-DD format, return as-is
-        if (typeof dateString === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateString)) {
-            return dateString;
+        // Validar formato (solo letras y números)
+        if (!/^[A-Z0-9]{4,20}$/.test(code)) {
+            Toast.error('Error', 'El código debe contener solo letras y números, entre 4 y 20 caracteres');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Guardar Código';
+            return;
         }
-        
-        // Parse ISO string and convert to local date
-        const date = new Date(dateString);
-        if (isNaN(date.getTime())) {
-            return '';
+
+        const result = await AuthManager.updateUserCode(userId, code);
+
+        if (result.success) {
+            this.closeModal();
+            Toast.success('Éxito', 'Código personal actualizado correctamente');
+            this.navigate('usuarios');
+        } else {
+            Toast.error('Error', result.message || 'No se pudo actualizar el código');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Guardar Código';
         }
-        
-        // Get local date components
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        
-        return `${year}-${month}-${day}`;
     }
 
-    /**
-     * Escape HTML
-     */
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
+    // ========================================================
+    // DEPARTAMENTOS (ADMIN)
+    // ========================================================
+    static async renderDepartamentos() {
+        if (!AuthManager.isAdmin()) {
+            document.getElementById('contentArea').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso Denegado</h3><p>No tiene permisos</p></div>`;
+            return;
+        }
+
+        const content = document.getElementById('contentArea');
+        
+        // Mostrar loading mientras se cargan los departamentos
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-building" style="margin-right:8px;color:var(--primary);"></i>Gestión de Departamentos</h3>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="App.syncDepartamentos()" title="Sincronizar desde configuración">
+                            <i class="fas fa-sync-alt"></i> Sincronizar
+                        </button>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateDepartamentoModal()">
+                            <i class="fas fa-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Departamento
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div style="text-align:center;padding:40px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:var(--primary);"></i>
+                        <p style="margin-top:16px;color:var(--text-secondary);">Cargando departamentos...</p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        try {
+            const departamentos = await DepartamentoManager.getAll();
+            console.log('Departamentos obtenidos:', departamentos);
+
+            if (!departamentos || departamentos.length === 0) {
+                content.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-building" style="margin-right:8px;color:var(--primary);"></i>Gestión de Departamentos</h3>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-outline btn-sm" onclick="App.syncDepartamentos()" title="Sincronizar desde configuración">
+                                <i class="fas fa-sync-alt"></i> Sincronizar
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="App.showCreateDepartamentoModal()">
+                                <i class="fas fa-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Departamento
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="empty-state">
+                            <i class="fas fa-building" style="font-size:3rem;color:var(--text-light);margin-bottom:16px;"></i>
+                            <h3>No hay departamentos registrados</h3>
+                            <p>Comience creando el primer departamento o sincronizando desde la configuración</p>
+                            <div style="display:flex;gap:8px;justify-content:center;margin-top:16px;">
+                                <button class="btn btn-outline" onclick="App.syncDepartamentos()">
+                                    <i class="fas fa-sync-alt" style="vertical-align:middle;margin-right:6px;"></i> Sincronizar
+                                </button>
+                                <button class="btn btn-primary" onclick="App.showCreateDepartamentoModal()">
+                                    <i class="fas fa-plus" style="vertical-align:middle;margin-right:6px;"></i> Crear Departamento
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+                return;
+            }
+
+            content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-building" style="margin-right:8px;color:var(--primary);"></i>Gestión de Departamentos</h3>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="App.syncDepartamentos()" title="Sincronizar desde configuración">
+                            <i class="fas fa-sync-alt"></i> Sincronizar
+                        </button>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateDepartamentoModal()">
+                            <i class="fas fa-plus"></i> Nuevo Departamento
+                        </button>
+                    </div>
+                </div>
+                <div class="card-body no-padding">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Código</th>
+                                    <th>Nombre</th>
+                                    <th>Color</th>
+                                    <th>Icono</th>
+                                    <th>Categorías</th>
+                                    <th>Estado</th>
+                                    <th>Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${departamentos.map(dep => {
+                                    const categoriasCount = dep.categorias ? Object.keys(dep.categorias).length : 0;
+                                    const activo = dep.activo !== false; // Por defecto activo
+                                    return `<tr>
+                                        <td><strong>${dep.codigo || dep.id}</strong></td>
+                                        <td>
+                                            <div style="display:flex;align-items:center;gap:10px;">
+                                                <div style="width:40px;height:40px;background:${dep.color || '#546e7a'};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;">
+                                                    <i class="${dep.icono || 'fas fa-building'}"></i>
+                                                </div>
+                                                <div><strong>${dep.nombre}</strong></div>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <div style="display:flex;align-items:center;gap:8px;">
+                                                <div style="width:30px;height:30px;background:${dep.color || '#546e7a'};border-radius:4px;border:1px solid rgba(0,0,0,0.1);"></div>
+                                                <span style="font-family:monospace;font-size:0.85rem;">${dep.color || '#546e7a'}</span>
+                                            </div>
+                                        </td>
+                                        <td><i class="${dep.icono || 'fas fa-building'}" style="font-size:1.2rem;color:${dep.color || '#546e7a'};"></i></td>
+                                        <td><span class="badge" style="background:var(--primary-light);color:var(--primary);">${categoriasCount} categoría(s)</span></td>
+                                        <td><span class="status-badge ${activo ? 'aprobada' : 'rechazada'}">${activo ? 'Activo' : 'Inactivo'}</span></td>
+                                        <td>
+                                            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                                                <button class="btn btn-sm btn-outline" onclick="App.showEditDepartamentoModal('${dep.codigo || dep.id}')" title="Editar">
+                                                    <i class="fas fa-edit"></i>
+                                                </button>
+                                                <button class="btn btn-sm btn-outline" onclick="App.showViewDepartamentoModal('${dep.codigo || dep.id}')" title="Ver detalles">
+                                                    <i class="fas fa-eye"></i>
+                                                </button>
+                                                <button class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.handleDeleteDepartamento('${dep.codigo || dep.id}')" title="Eliminar">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        `;
+        } catch (error) {
+            console.error('Error renderizando departamentos:', error);
+            content.innerHTML = `
+                <div class="card">
+                    <div class="card-header">
+                        <h3><i class="fas fa-building" style="margin-right:8px;color:var(--primary);"></i>Gestión de Departamentos</h3>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateDepartamentoModal()">
+                            <i class="fas fa-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Departamento
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div class="empty-state">
+                            <i class="fas fa-exclamation-triangle" style="font-size:3rem;color:var(--danger);margin-bottom:16px;"></i>
+                            <h3>Error al cargar departamentos</h3>
+                            <p>${error.message || 'Ocurrió un error al obtener los departamentos'}</p>
+                            <button class="btn btn-primary" onclick="App.navigate('departamentos')" style="margin-top:16px;">
+                                <i class="fas fa-redo"></i> Reintentar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    static showCreateDepartamentoModal() {
+        // Iconos disponibles comunes
+        const iconos = [
+            { value: 'fas fa-building', label: 'Edificio' },
+            { value: 'fas fa-chart-line', label: 'Finanzas' },
+            { value: 'fas fa-file-medical', label: 'Documentos' },
+            { value: 'fas fa-users', label: 'Recursos Humanos' },
+            { value: 'fas fa-concierge-bell', label: 'Recepción' },
+            { value: 'fas fa-hospital', label: 'Hospital' },
+            { value: 'fas fa-stethoscope', label: 'Médico' },
+            { value: 'fas fa-briefcase', label: 'Oficina' },
+            { value: 'fas fa-clipboard', label: 'Administración' }
+        ];
+
+        const iconosOptions = iconos.map(icon => 
+            `<option value="${icon.value}">${icon.label}</option>`
+        ).join('');
+
+        this.showModal('Crear Nuevo Departamento', `
+            <form onsubmit="App.handleCreateDepartamento(event)">
+                <div class="form-group">
+                    <label>Código <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="newDepCodigo" placeholder="Ej: DG-100" required pattern="[A-Z0-9-]+" style="text-transform:uppercase;">
+                    <p class="form-help">Código único del departamento (solo letras mayúsculas, números y guiones)</p>
+                </div>
+                <div class="form-group">
+                    <label>Nombre <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="newDepNombre" placeholder="Ej: Gerencia General" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Color <span class="required">*</span></label>
+                        <input type="color" class="form-control" id="newDepColor" value="#546e7a" required style="height:45px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Icono <span class="required">*</span></label>
+                        <select class="form-control" id="newDepIcono" required>
+                            ${iconosOptions}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Categorías (Opcional)</label>
+                    <p class="form-help">Las categorías se pueden agregar después de crear el departamento</p>
+                    <textarea class="form-control" id="newDepCategorias" rows="3" placeholder='Formato JSON: {"1": {"nombre": "Categoría", "subcategorias": {"1.1": "Subcategoría"}}}' style="font-family:monospace;font-size:0.85rem;"></textarea>
+                    <p class="form-help" style="font-size:0.75rem;margin-top:4px;">Deje vacío para agregar categorías después, o ingrese JSON válido</p>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnCreateDep">
+                        <i class="fas fa-plus" style="vertical-align:middle;margin-right:6px;"></i> Crear
+                    </button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async handleCreateDepartamento(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btnCreateDep');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
+
+        const codigo = document.getElementById('newDepCodigo').value.toUpperCase().trim();
+        const nombre = document.getElementById('newDepNombre').value.trim();
+        const color = document.getElementById('newDepColor').value;
+        const icono = document.getElementById('newDepIcono').value;
+        let categorias = {};
+
+        // Intentar parsear categorías si se proporcionaron
+        const categoriasText = document.getElementById('newDepCategorias').value.trim();
+        if (categoriasText) {
+            try {
+                categorias = JSON.parse(categoriasText);
+            } catch (error) {
+                Toast.error('Error', 'Formato JSON inválido en categorías');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-plus"></i> Crear';
+                return;
+            }
+        }
+
+        const depData = {
+            codigo,
+            nombre,
+            color,
+            icono,
+            categorias
+        };
+
+        const result = await DepartamentoManager.create(depData);
+
+        if (result.success) {
+            this.closeModal();
+            Toast.success('Departamento creado', `${nombre} ha sido creado correctamente`);
+            this.navigate('departamentos');
+        } else {
+            Toast.error('Error', result.message || 'No se pudo crear el departamento');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-plus"></i> Crear';
+        }
+    }
+
+    static async showEditDepartamentoModal(depId) {
+        const dep = await DepartamentoManager.getById(depId);
+        if (!dep) {
+            Toast.error('Error', 'Departamento no encontrado');
+            return;
+        }
+
+        const iconos = [
+            { value: 'fas fa-building', label: 'Edificio' },
+            { value: 'fas fa-chart-line', label: 'Finanzas' },
+            { value: 'fas fa-file-medical', label: 'Documentos' },
+            { value: 'fas fa-users', label: 'Recursos Humanos' },
+            { value: 'fas fa-concierge-bell', label: 'Recepción' },
+            { value: 'fas fa-hospital', label: 'Hospital' },
+            { value: 'fas fa-stethoscope', label: 'Médico' },
+            { value: 'fas fa-briefcase', label: 'Oficina' },
+            { value: 'fas fa-clipboard', label: 'Administración' }
+        ];
+
+        const iconosOptions = iconos.map(icon => 
+            `<option value="${icon.value}" ${dep.icono === icon.value ? 'selected' : ''}>${icon.label}</option>`
+        ).join('');
+
+        const categoriasJson = JSON.stringify(dep.categorias || {}, null, 2);
+
+        this.showModal('Editar Departamento', `
+            <form onsubmit="App.handleEditDepartamento(event, '${depId}')">
+                <div class="form-group">
+                    <label>Código</label>
+                    <input type="text" class="form-control" id="editDepCodigo" value="${dep.codigo || depId}" disabled style="background:var(--bg-secondary);">
+                    <p class="form-help">El código no se puede modificar</p>
+                </div>
+                <div class="form-group">
+                    <label>Nombre <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="editDepNombre" value="${dep.nombre}" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Color <span class="required">*</span></label>
+                        <input type="color" class="form-control" id="editDepColor" value="${dep.color || '#546e7a'}" required style="height:45px;">
+                    </div>
+                    <div class="form-group">
+                        <label>Icono <span class="required">*</span></label>
+                        <select class="form-control" id="editDepIcono" required>
+                            ${iconosOptions}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Categorías</label>
+                    <textarea class="form-control" id="editDepCategorias" rows="8" style="font-family:monospace;font-size:0.85rem;">${categoriasJson}</textarea>
+                    <p class="form-help" style="font-size:0.75rem;margin-top:4px;">Formato JSON. Modifique con cuidado para mantener la estructura válida.</p>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnEditDep">
+                        <i class="fas fa-save"></i> Guardar
+                    </button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async handleEditDepartamento(e, depId) {
+        e.preventDefault();
+        const btn = document.getElementById('btnEditDep');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+
+        const nombre = document.getElementById('editDepNombre').value.trim();
+        const color = document.getElementById('editDepColor').value;
+        const icono = document.getElementById('editDepIcono').value;
+        let categorias = {};
+
+        // Parsear categorías
+        const categoriasText = document.getElementById('editDepCategorias').value.trim();
+        try {
+            categorias = categoriasText ? JSON.parse(categoriasText) : {};
+        } catch (error) {
+            Toast.error('Error', 'Formato JSON inválido en categorías');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Guardar';
+            return;
+        }
+
+        const updates = {
+            nombre,
+            color,
+            icono,
+            categorias
+        };
+
+        const result = await DepartamentoManager.update(depId, updates);
+
+        if (result.success) {
+            this.closeModal();
+            Toast.success('Actualizado', 'Los cambios han sido guardados');
+            this.navigate('departamentos');
+        } else {
+            Toast.error('Error', result.message || 'No se pudo actualizar el departamento');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Guardar';
+        }
+    }
+
+    static async showViewDepartamentoModal(depId) {
+        const dep = await DepartamentoManager.getById(depId);
+        if (!dep) {
+            Toast.error('Error', 'Departamento no encontrado');
+            return;
+        }
+
+        const categorias = dep.categorias || {};
+        const categoriasHtml = Object.keys(categorias).length > 0 
+            ? Object.entries(categorias).map(([catKey, cat]) => {
+                const subcats = cat.subcategorias || {};
+                const subcatsHtml = Object.entries(subcats).map(([subKey, subName]) => 
+                    `<div style="padding:8px 12px;background:var(--bg-secondary);border-radius:4px;margin-left:20px;margin-top:4px;">
+                        <strong>${subKey}:</strong> ${subName}
+                    </div>`
+                ).join('');
+                return `
+                    <div style="margin-bottom:12px;padding:12px;background:var(--bg-secondary);border-radius:8px;">
+                        <strong style="color:var(--primary);">${catKey}: ${cat.nombre}</strong>
+                        ${subcatsHtml}
+                    </div>
+                `;
+            }).join('')
+            : '<p style="color:var(--text-light);font-style:italic;">No hay categorías definidas</p>';
+
+        this.showModal('Detalles del Departamento', `
+            <div style="margin-bottom:20px;">
+                <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;padding:16px;background:var(--bg-secondary);border-radius:8px;">
+                    <div style="width:60px;height:60px;background:${dep.color || '#546e7a'};border-radius:12px;display:flex;align-items:center;justify-content:center;color:white;font-size:1.5rem;">
+                        <i class="${dep.icono || 'fas fa-building'}"></i>
+                    </div>
+                    <div>
+                        <h3 style="margin:0;color:var(--text-primary);">${dep.nombre}</h3>
+                        <p style="margin:4px 0 0 0;color:var(--text-secondary);font-size:0.9rem;"><strong>Código:</strong> ${dep.codigo || depId}</p>
+                    </div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;margin-bottom:8px;font-weight:600;color:var(--text-primary);">Color</label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <div style="width:50px;height:50px;background:${dep.color || '#546e7a'};border-radius:8px;border:2px solid rgba(0,0,0,0.1);"></div>
+                        <span style="font-family:monospace;font-size:1rem;color:var(--text-secondary);">${dep.color || '#546e7a'}</span>
+                    </div>
+                </div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block;margin-bottom:8px;font-weight:600;color:var(--text-primary);">Icono</label>
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <i class="${dep.icono || 'fas fa-building'}" style="font-size:2rem;color:${dep.color || '#546e7a'};"></i>
+                        <span style="font-family:monospace;font-size:0.9rem;color:var(--text-secondary);">${dep.icono || 'fas fa-building'}</span>
+                    </div>
+                </div>
+                <div>
+                    <label style="display:block;margin-bottom:12px;font-weight:600;color:var(--text-primary);">Categorías (${Object.keys(categorias).length})</label>
+                    ${categoriasHtml}
+                </div>
+            </div>
+            <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:20px;">
+                <button class="btn btn-outline" onclick="App.closeModal()">Cerrar</button>
+                <button class="btn btn-primary" onclick="App.closeModal(); App.showEditDepartamentoModal('${depId}')">
+                    <i class="fas fa-edit" style="margin-right:6px;"></i> Editar
+                </button>
+            </div>
+        `);
+    }
+
+    static handleDeleteDepartamento(depId) {
+        this.showModal('Eliminar Departamento', `
+            <p style="margin-bottom:20px;">¿Está seguro de que desea <strong style="color:var(--danger);">eliminar</strong> este departamento?</p>
+            <p style="margin-bottom:20px;padding:12px;background:var(--warning-light);border-left:4px solid var(--warning);border-radius:4px;font-size:0.9rem;">
+                <i class="fas fa-exclamation-triangle" style="margin-right:6px;"></i>
+                <strong>Advertencia:</strong> Esta acción no se puede deshacer. El departamento solo se puede eliminar si no tiene usuarios ni documentos asociados.
+            </p>
+            <div style="display:flex;gap:10px;justify-content:flex-end;">
+                <button class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                <button class="btn btn-danger" onclick="App.confirmDeleteDepartamento('${depId}')">
+                    <i class="fas fa-trash"></i> Eliminar
+                </button>
+            </div>
+        `);
+    }
+
+    static async confirmDeleteDepartamento(depId) {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Eliminando...';
+
+        const result = await DepartamentoManager.delete(depId);
+
+        if (result.success) {
+            this.closeModal();
+            Toast.success('Eliminado', 'El departamento ha sido eliminado');
+            this.navigate('departamentos');
+        } else {
+            Toast.error('Error', result.message || 'No se pudo eliminar el departamento');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-trash"></i> Eliminar';
+        }
+    }
+
+    static async syncDepartamentos() {
+        const confirmed = confirm('¿Desea sincronizar los departamentos desde la configuración inicial? Esto agregará los departamentos que no existen en Firebase.');
+        if (!confirmed) return;
+
+        Toast.info('Sincronizando', 'Sincronizando departamentos...');
+        const result = await DepartamentoManager.syncFromDataJs();
+
+        if (result.success) {
+            Toast.success('Sincronizado', `Se sincronizaron ${result.synced} departamento(s)`);
+            this.navigate('departamentos');
+        } else {
+            Toast.error('Error', result.message || 'No se pudo sincronizar');
+        }
+    }
+
+    // ========================================================
+    // NOTIFICACIONES
+    // ========================================================
+    static toggleNotifications() {
+        const panel = document.getElementById('notifPanel');
+        const overlay = document.getElementById('notifOverlay');
+        const isOpen = panel.classList.contains('open');
+
+        if (isOpen) {
+            panel.classList.remove('open');
+            overlay.classList.remove('open');
+        } else {
+            this.renderNotifications();
+            panel.classList.add('open');
+            overlay.classList.add('open');
+        }
+    }
+
+    static async renderNotifications() {
+        const user = AuthManager.getUser();
+        if (!user) return;
+
+        const notifications = await NotificationManager.getByUser(user.id);
+        const container = document.getElementById('notifList');
+
+        if (notifications.length === 0) {
+            container.innerHTML = `<div class="notif-empty"><i class="fas fa-bell-slash"></i><p>No hay notificaciones</p></div>`;
+            return;
+        }
+
+        container.innerHTML = notifications.map(n => `
+            <div class="notif-item ${n.leida ? '' : 'unread'}" onclick="App.handleNotifClick('${n.id}', '${n.referenciaType}', '${n.referencia}')">
+                <div class="notif-icon" style="background:${NotificationManager.getColor(n.tipo)};"><i class="${NotificationManager.getIcon(n.tipo)}"></i></div>
+                <div class="notif-content">
+                    <h4>${n.titulo}</h4>
+                    <p>${n.mensaje}</p>
+                    <span class="notif-time">${timeAgo(n.fecha)}</span>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    static async handleNotifClick(notifId, refType, refId) {
+        await NotificationManager.markAsRead(notifId);
+        this.toggleNotifications();
+
+        if (refType === 'document' && refId && refId !== 'null') {
+            this.navigate('ver-documento', { id: refId });
+        } else if (refType === 'request' && refId && refId !== 'null') {
+            this.navigate(AuthManager.isEncargado() ? 'gestionar-solicitudes' : 'solicitudes');
+        }
+    }
+
+    static async markAllNotifRead() {
+        const user = AuthManager.getUser();
+        if (user) {
+            await NotificationManager.markAllAsRead(user.id);
+            this.renderNotifications();
+            Toast.success('Listo', 'Notificaciones marcadas como leídas');
+        }
+    }
+
+    // ========================================================
+    // MODAL
+    // ========================================================
+    static showModal(title, content, wide = false) {
+        const modal = document.getElementById('modalOverlay');
+        document.getElementById('modalTitle').textContent = title;
+        document.getElementById('modalBody').innerHTML = content;
+        modal.querySelector('.modal').style.maxWidth = wide ? '900px' : '600px';
+        modal.classList.add('open');
+    }
+
+    static closeModal() {
+        document.getElementById('modalOverlay').classList.remove('open');
     }
 }
 
-// Initialize app when DOM is ready
-let app;
+// ============================================================
+// TOAST NOTIFICATION SYSTEM
+// ============================================================
+class Toast {
+    static container = null;
+    static init() { this.container = document.getElementById('toastContainer'); }
+
+    static show(type, title, message) {
+        if (!this.container) this.init();
+        const icons = { success: 'fas fa-check-circle', error: 'fas fa-exclamation-circle', warning: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle' };
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `
+            <i class="${icons[type] || icons.info}"></i>
+            <div class="toast-text"><h4>${title}</h4>${message ? `<p>${message}</p>` : ''}</div>
+            <button class="toast-close" onclick="this.parentElement.remove()"><i class="fas fa-times"></i></button>
+        `;
+        this.container.appendChild(toast);
+        setTimeout(() => { toast.classList.add('hiding'); setTimeout(() => toast.remove(), 300); }, 4000);
+    }
+
+    static success(title, message) { this.show('success', title, message); }
+    static error(title, message) { this.show('error', title, message); }
+    static warning(title, message) { this.show('warning', title, message); }
+    static info(title, message) { this.show('info', title, message); }
+}
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
 document.addEventListener('DOMContentLoaded', () => {
-    app = new App();
-    window.app = app; // Make available globally for onclick handlers
+    App.init();
 });
-
-// Export functions for onclick handlers
-App.prototype.exportComunicadoPDF = async function(id) {
-    try {
-        if (!id) {
-            showNotification('Error: ID de comunicado no válido', 'error');
-            return;
-        }
-        
-        const comunicado = await db.get('comunicados', id);
-        if (!comunicado) {
-            showNotification('Comunicado no encontrado', 'error');
-            return;
-        }
-        
-        // Si el modal no está abierto, abrirlo primero para renderizar el documento
-        const modal = document.getElementById('modal-ver-comunicado');
-        const documentoElement = document.getElementById('comunicado-documento');
-        const wasModalOpen = modal && modal.style.display === 'flex' && documentoElement && documentoElement.innerHTML.trim();
-        
-        if (!wasModalOpen) {
-            // Abrir el modal para renderizar el documento
-            await this.showComunicadoDetalle(id);
-            // Esperar a que se renderice completamente
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        showNotification('Generando PDF...', 'info');
-        await this.exportSystem.exportComunicadoPDF(comunicado);
-        showNotification('Comunicado exportado a PDF exitosamente', 'success');
-        
-        // Si el modal no estaba abierto antes, cerrarlo después de un momento
-        if (!wasModalOpen && modal) {
-            setTimeout(() => {
-                modal.style.display = 'none';
-            }, 1500);
-        }
-    } catch (error) {
-        console.error('Error al exportar comunicado:', error);
-        showNotification('Error al exportar el comunicado a PDF', 'error');
-    }
-};
-
-App.prototype.exportComunicadosPDF = async function() {
-    const user = auth.getCurrentUser();
-    let comunicados = await db.getAll('comunicados');
-    
-    // Filter by user's department if not admin
-    if (!auth.isAdmin()) {
-        comunicados = comunicados.filter(c => c.departamento === user.departamento || c.tipo === 'externo');
-    }
-    
-    // Apply current filters
-    const filterDept = document.getElementById('filter-departamento')?.value || '';
-    const filterTipo = document.getElementById('filter-tipo')?.value || '';
-    const search = document.getElementById('search-comunicados')?.value.toLowerCase() || '';
-    
-    if (filterDept) {
-        comunicados = comunicados.filter(c => c.departamento === filterDept);
-    }
-    if (filterTipo) {
-        comunicados = comunicados.filter(c => c.tipo === filterTipo);
-    }
-    if (search) {
-        comunicados = comunicados.filter(c => 
-            c.titulo.toLowerCase().includes(search) ||
-            c.contenido.toLowerCase().includes(search) ||
-            c.codigo.toLowerCase().includes(search)
-        );
-    }
-    
-    if (comunicados.length === 0) {
-        showNotification('No hay comunicados para exportar', 'info');
-        return;
-    }
-    
-    await this.exportSystem.exportComunicadosPDF(comunicados);
-    showNotification(`${comunicados.length} comunicado(s) exportado(s) a PDF`, 'success');
-};
-
-App.prototype.exportComunicadosExcel = async function() {
-    const user = auth.getCurrentUser();
-    let comunicados = await db.getAll('comunicados');
-    
-    if (!auth.isAdmin()) {
-        comunicados = comunicados.filter(c => c.departamento === user.departamento || c.tipo === 'externo');
-    }
-    
-    await this.exportSystem.exportComunicadosExcel(comunicados);
-    showNotification('Comunicados exportados a Excel', 'success');
-};
-
-App.prototype.exportSolicitudPDF = async function(id) {
-    const solicitud = await db.get('solicitudes', id);
-    if (!solicitud) {
-        showNotification('Solicitud no encontrada', 'error');
-        return;
-    }
-    await this.exportSystem.exportSolicitudPDF(solicitud);
-    showNotification('Solicitud exportada a PDF', 'success');
-};
-
-App.prototype.exportSolicitudesPDF = async function() {
-    let solicitudes = await db.getAll('solicitudes');
-    
-    // Apply current admin filters
-    const filterDept = document.getElementById('admin-filter-departamento')?.value || '';
-    const filterTipo = document.getElementById('admin-filter-tipo')?.value || '';
-    const search = document.getElementById('admin-search-empleado')?.value.toLowerCase() || '';
-    
-    if (filterDept) {
-        solicitudes = solicitudes.filter(s => s.departamento === filterDept);
-    }
-    if (filterTipo) {
-        solicitudes = solicitudes.filter(s => s.tipo === filterTipo);
-    }
-    if (search) {
-        solicitudes = solicitudes.filter(s => 
-            (s.usuarioNombre || '').toLowerCase().includes(search)
-        );
-    }
-    
-    if (solicitudes.length === 0) {
-        showNotification('No hay solicitudes para exportar', 'info');
-        return;
-    }
-    
-    if (solicitudes.length > 10) {
-        const confirm = window.confirm(`Se exportarán ${solicitudes.length} solicitudes. Esto puede generar muchos archivos. ¿Continuar?`);
-        if (!confirm) return;
-    }
-    
-    await this.exportSystem.exportSolicitudesPDF(solicitudes);
-    showNotification(`${solicitudes.length} solicitud(es) exportada(s) a PDF`, 'success');
-};
-
-App.prototype.exportSolicitudesExcel = async function() {
-    let solicitudes = await db.getAll('solicitudes');
-    
-    // Apply current admin filters
-    const filterDept = document.getElementById('admin-filter-departamento')?.value || '';
-    const filterTipo = document.getElementById('admin-filter-tipo')?.value || '';
-    const search = document.getElementById('admin-search-empleado')?.value.toLowerCase() || '';
-    
-    if (filterDept) {
-        solicitudes = solicitudes.filter(s => s.departamento === filterDept);
-    }
-    if (filterTipo) {
-        solicitudes = solicitudes.filter(s => s.tipo === filterTipo);
-    }
-    if (search) {
-        solicitudes = solicitudes.filter(s => 
-            (s.usuarioNombre || '').toLowerCase().includes(search)
-        );
-    }
-    
-    await this.exportSystem.exportSolicitudesExcel(solicitudes);
-    showNotification('Solicitudes exportadas a Excel', 'success');
-};
-
-// Agregar método escapeHtml al prototipo de App
-App.prototype.escapeHtml = function(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-};
-
-export default App;
-

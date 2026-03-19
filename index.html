@@ -3,492 +3,262 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sistema Administrativo</title>
-    <meta name="description" content="Sistema administrativo para gestión de comunicados y solicitudes">
+    <title>VSMP - Sistema Administrativo | Veterinaria San Martín de Porres</title>
+
+    <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
-    <!-- Premium Design System - Single Complete CSS File -->
-    <link rel="stylesheet" href="css/premium-design.css">
-    <!-- HTML2Canvas for PDF generation -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <!-- App CSS -->
+    <link rel="stylesheet" href="css/styles.css">
+
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐾</text></svg>">
 </head>
 <body>
-    <!-- Skip to main content link for accessibility -->
-    <a href="#main-content" class="skip-link">Saltar al contenido principal</a>
-    
-    <!-- Login Screen (visible by default) -->
-    <div id="login-screen" class="auth-container">
-        <div class="auth-card">
-            <div class="auth-header">
-                <img src="assets/logo.png" alt="Logo" class="logo" onerror="this.style.display='none'">
-                <h1>Sistema Administrativo</h1>
-                <p>Inicie sesión para continuar</p>
+
+    <!-- ============================================================
+         LOADING SCREEN
+         ============================================================ -->
+    <div id="loadingScreen" style="position:fixed;top:0;left:0;width:100%;height:100%;background:linear-gradient(135deg, #0d1b2a 0%, #1565c0 50%, #00897b 100%);display:flex;align-items:center;justify-content:center;z-index:9999;">
+        <div style="text-align:center;">
+            <div style="width:80px;height:80px;background:rgba(255,255,255,0.15);border-radius:20px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;">
+                <i class="fas fa-paw" style="font-size:36px;color:white;"></i>
             </div>
-            <form id="login-form" class="auth-form">
-                <div class="form-group">
-                    <label for="login-email">Email <span class="required-indicator">*</span></label>
-                    <input type="email" id="login-email" required autocomplete="email" placeholder="tu@email.com">
-                </div>
-                <div class="form-group">
-                    <label for="login-password">Contraseña <span class="required-indicator">*</span></label>
-                    <input type="password" id="login-password" required autocomplete="current-password" placeholder="••••••••">
-                </div>
-                <button type="submit" class="btn btn-primary btn-block" aria-label="Iniciar sesión en el sistema">Iniciar Sesión</button>
-                <div id="login-error" class="error-message"></div>
-            </form>
+            <h2 style="color:white;font-size:1.2rem;margin-bottom:8px;">Veterinaria San Martín de Porres</h2>
+            <p style="color:rgba(255,255,255,0.6);font-size:0.85rem;margin-bottom:20px;">Cargando sistema...</p>
+            <i class="fas fa-spinner fa-spin" style="color:white;font-size:1.5rem;"></i>
         </div>
     </div>
 
-    <!-- Main Application (hidden by default) -->
-    <div id="app" class="app-container" style="display: none;">
-        <!-- Header -->
-        <header class="header">
-            <button class="menu-toggle" id="menu-toggle" aria-label="Toggle menu">
-                <span></span>
-                <span></span>
-                <span></span>
-            </button>
-            <h1 class="app-title">Sistema Administrativo</h1>
-            <div class="user-menu">
-                <span id="user-name" class="user-name"></span>
-                <button id="logout-btn" class="btn btn-secondary">Cerrar Sesión</button>
+    <!-- ============================================================
+         LOGIN PAGE
+         ============================================================ -->
+    <div id="loginPage" class="login-page" style="display:none;">
+        <div class="login-container">
+            <div class="login-logo">
+                <div class="logo-icon">
+                    <i class="fas fa-paw"></i>
+                </div>
+                <h1>Veterinaria San Martín de Porres</h1>
+                <p>Sistema Administrativo Digital</p>
             </div>
-        </header>
 
-        <!-- Sidebar -->
+            <div class="login-error" id="loginError"></div>
+
+            <form class="login-form" onsubmit="App.handleLogin(event)">
+                <div class="form-group">
+                    <label>Correo Electrónico</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-envelope"></i>
+                        <input type="email" id="loginEmail" placeholder="correo@vsmp.com" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <div class="input-wrapper">
+                        <i class="fas fa-lock"></i>
+                        <input type="password" id="loginPassword" placeholder="••••••••" required>
+                    </div>
+                </div>
+                <button type="submit" class="login-btn">
+                    <i class="fas fa-sign-in-alt" style="margin-right:8px;"></i> Iniciar Sesión
+                </button>
+            </form>
+
+            <div class="login-demo">
+                <p>⚠️ Los usuarios se crean desde el panel de Administrador</p>
+                <p style="font-size:0.75rem;color:var(--text-light);margin-top:6px;">
+                    Para iniciar, cree un usuario admin con el script de inicialización
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================
+         APP PAGE
+         ============================================================ -->
+    <div id="appPage" class="app-container" style="display:none;">
+
+        <!-- SIDEBAR -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <div class="sidebar-logo-text">Sistema Admin</div>
+                <div class="logo-icon">
+                    <i class="fas fa-paw"></i>
                 </div>
-                <div class="sidebar-subtitle">Gestión Integral</div>
+                <div class="logo-text">
+                    <h2>VSMP</h2>
+                    <span>Sistema Administrativo</span>
+                </div>
             </div>
-            <nav class="nav-menu">
-                <a href="#" class="nav-item" data-page="dashboard" aria-label="Dashboard - Ver estadísticas y resumen">
-                    <span class="nav-icon">📊</span>
-                    <span>Dashboard</span>
-                </a>
-                <a href="#" class="nav-item" data-page="comunicados" aria-label="Comunicados - Ver y crear comunicados digitales">
-                    <span class="nav-icon">📢</span>
-                    <span>Comunicados</span>
-                </a>
-                <a href="#" class="nav-item" data-page="solicitudes" aria-label="Solicitudes - Ver y crear solicitudes">
-                    <span class="nav-icon">📝</span>
-                    <span>Solicitudes</span>
-                </a>
-                <a href="#" class="nav-item" data-page="admin-panel" id="admin-link" style="display: none;" aria-label="Panel Administrativo - Gestionar solicitudes y administrar el sistema">
-                    <span class="nav-icon">⚙️</span>
-                    <span>Panel Admin</span>
-                </a>
+
+            <nav class="sidebar-nav">
+                <!-- PRINCIPAL -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Principal</div>
+                    <div class="nav-item active" data-view="dashboard" data-role="all" onclick="App.navigate('dashboard')">
+                        <i class="fas fa-home"></i>
+                        <span>Dashboard</span>
+                    </div>
+                </div>
+
+                <!-- DOCUMENTOS -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Documentos</div>
+                    <div class="nav-item" data-view="crear-documento" data-role="admin,encargado" onclick="App.navigate('crear-documento')">
+                        <i class="fas fa-plus-circle"></i>
+                        <span>Crear Documento</span>
+                    </div>
+                    <div class="nav-item" data-view="documentos" data-role="all" onclick="App.navigate('documentos')">
+                        <i class="fas fa-folder-open"></i>
+                        <span>Ver Documentos</span>
+                    </div>
+                </div>
+
+                <!-- SOLICITUDES -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Solicitudes</div>
+                    <div class="nav-item" data-view="nueva-solicitud" data-role="all" onclick="App.navigate('nueva-solicitud')">
+                        <i class="fas fa-paper-plane"></i>
+                        <span>Nueva Solicitud</span>
+                    </div>
+                    <div class="nav-item" data-view="solicitudes" data-role="all" onclick="App.navigate('solicitudes')">
+                        <i class="fas fa-clipboard-list"></i>
+                        <span>Mis Solicitudes</span>
+                    </div>
+                    <div class="nav-item" data-view="gestionar-solicitudes" data-role="admin,encargado" onclick="App.navigate('gestionar-solicitudes')">
+                        <i class="fas fa-tasks"></i>
+                        <span>Gestionar Solicitudes</span>
+                        <span class="badge" id="navNotifBadge" style="display:none;"></span>
+                    </div>
+                </div>
+
+                <!-- ADMINISTRACIÓN -->
+                <div class="nav-section">
+                    <div class="nav-section-title">Administración</div>
+                    <div class="nav-item" data-view="usuarios" data-role="admin" onclick="App.navigate('usuarios')">
+                        <i class="fas fa-users-cog"></i>
+                        <span>Usuarios</span>
+                    </div>
+                    <div class="nav-item" data-view="departamentos" data-role="admin" onclick="App.navigate('departamentos')">
+                        <i class="fas fa-building"></i>
+                        <span>Departamentos</span>
+                    </div>
+                </div>
             </nav>
+
+            <div class="sidebar-footer">
+                <div class="sidebar-user" onclick="App.handleLogout()">
+                    <div class="avatar" id="sidebarUserAvatar">AD</div>
+                    <div class="user-info">
+                        <h4 id="sidebarUserName">Admin Sistema</h4>
+                        <span id="sidebarUserRole">Administrador</span>
+                    </div>
+                    <i class="fas fa-sign-out-alt" style="color:rgba(255,255,255,0.4);margin-left:auto;"></i>
+                </div>
+            </div>
         </aside>
 
-        <!-- Main Content -->
-        <main class="main-content" id="main-content" role="main">
-            <!-- Dashboard Page -->
-            <div id="page-dashboard" class="page" style="display: none;">
-                <h2>Dashboard</h2>
-                <div class="stats-grid" id="stats-grid">
-                    <!-- Stats will be loaded dynamically -->
-                </div>
-            </div>
-
-            <!-- Comunicados Page -->
-            <div id="page-comunicados" class="page" style="display: none;">
-                <div class="page-header">
-                    <h2>Comunicados Digitales</h2>
-                    <div style="display: flex; gap: var(--spacing-3); align-items: center;">
-                        <div class="export-actions">
-                            <button class="export-btn pdf" onclick="window.app?.exportComunicadosPDF()" title="Exportar todos a PDF">
-                                📄 PDF
-                            </button>
-                            <button class="export-btn excel" onclick="window.app?.exportComunicadosExcel()" title="Exportar a Excel">
-                                📊 Excel
-                            </button>
-                        </div>
-                        <button id="btn-new-comunicado" class="btn btn-primary" title="Crear un nuevo comunicado digital" aria-label="Crear nuevo comunicado">Nuevo Comunicado</button>
+        <!-- MAIN CONTENT -->
+        <main class="main-content">
+            <!-- HEADER -->
+            <header class="main-header">
+                <div class="header-left">
+                    <button class="menu-toggle" onclick="App.toggleSidebar()">
+                        <i class="fas fa-bars"></i>
+                    </button>
+                    <div class="page-title">
+                        <h1 id="pageTitle">Dashboard</h1>
+                        <p id="pageDesc">Panel de control general</p>
                     </div>
                 </div>
-                <div class="filters-bar">
-                    <div class="search-wrapper">
-                        <input type="text" id="search-comunicados" placeholder="Buscar comunicados..." class="search-input">
-                        <span class="search-icon">🔍</span>
-                    </div>
-                    <select id="filter-departamento" class="filter-select" title="Filtrar por departamento">
-                        <option value="">Todos los departamentos</option>
-                    </select>
-                    <select id="filter-tipo" class="filter-select" title="Filtrar por tipo">
-                        <option value="">Todos los tipos</option>
-                        <option value="interno">Interno</option>
-                        <option value="externo">Externo</option>
-                    </select>
-                </div>
-                <div id="comunicados-list" class="comunicados-list">
-                    <!-- Comunicados will be loaded dynamically -->
-                </div>
-            </div>
-
-            <!-- Solicitudes Page -->
-            <div id="page-solicitudes" class="page" style="display: none;">
-                <div class="page-header">
-                    <h2>Mis Solicitudes</h2>
-                    <button id="btn-new-solicitud" class="btn btn-primary" title="Crear una nueva solicitud de permisos, vacaciones u otra" aria-label="Crear nueva solicitud">Nueva Solicitud</button>
-                </div>
-                <div id="solicitudes-stats-container" class="solicitudes-stats-container"></div>
-                <div class="view-toggle-buttons" style="display: flex; gap: var(--spacing-2); margin: var(--spacing-4) 0;">
-                    <button class="btn btn-sm btn-secondary view-toggle-btn active" data-view="list" onclick="window.app.toggleSolicitudesView('list')">
-                        📋 Lista
-                    </button>
-                    <button class="btn btn-sm btn-secondary view-toggle-btn" data-view="timeline" onclick="window.app.toggleSolicitudesView('timeline')">
-                        📅 Timeline
-                    </button>
-                    <button class="btn btn-sm btn-secondary view-toggle-btn" data-view="calendar" onclick="window.app.toggleSolicitudesView('calendar')">
-                        📆 Calendario
+                <div class="header-right">
+                    <button class="header-btn" onclick="App.toggleNotifications()" title="Notificaciones">
+                        <i class="fas fa-bell"></i>
+                        <span class="notif-count" id="notifCount" data-count="0"></span>
                     </button>
                 </div>
-                <div class="filters-bar" id="solicitudes-filters-bar" style="display: none;">
-                    <select id="solicitudes-filter-estado" class="filter-select">
-                        <option value="">Todos los estados</option>
-                        <option value="pendiente">Pendiente</option>
-                        <option value="aprobada">Aprobada</option>
-                        <option value="rechazada">Rechazada</option>
-                        <option value="en_revision">En Revisión</option>
-                    </select>
-                    <select id="solicitudes-filter-tipo" class="filter-select">
-                        <option value="">Todos los tipos</option>
-                        <option value="permiso">Permiso</option>
-                        <option value="vacaciones">Vacaciones</option>
-                        <option value="otra">Otra</option>
-                    </select>
-                    <input type="date" id="solicitudes-filter-fecha-inicio" class="filter-input" placeholder="Fecha inicio">
-                    <input type="date" id="solicitudes-filter-fecha-fin" class="filter-input" placeholder="Fecha fin">
-                </div>
-                <div id="solicitudes-list" class="solicitudes-list">
-                    <!-- Solicitudes will be loaded dynamically -->
-                </div>
-                <div id="solicitudes-timeline" class="solicitudes-timeline" style="display: none;">
-                    <!-- Timeline view will be loaded dynamically -->
-                </div>
-                <div id="solicitudes-calendar" class="solicitudes-calendar" style="display: none;">
-                    <!-- Calendar view will be loaded dynamically -->
-                </div>
-            </div>
+            </header>
 
-            <!-- Admin Panel Page -->
-            <div id="page-admin-panel" class="page" style="display: none;">
-                <div class="page-header">
-                    <h2>Panel Administrativo</h2>
-                    <div style="display: flex; gap: 1rem; align-items: center;">
-                        <button class="btn btn-primary" id="btn-nuevo-empleado" title="Agregar nuevo empleado">
-                            ➕ Nuevo Empleado
-                        </button>
-                        <div class="export-actions">
-                            <button class="export-btn pdf" onclick="window.app?.exportSolicitudesPDF()" title="Exportar todas las solicitudes a PDF">
-                                📄 PDF
-                            </button>
-                            <button class="export-btn excel" onclick="window.app?.exportSolicitudesExcel()" title="Exportar solicitudes a Excel">
-                                📊 Excel
-                            </button>
-                        </div>
-                    </div>
-                </div>
-                <div class="admin-tabs" style="margin-bottom: 1.5rem; border-bottom: 2px solid var(--border-color);">
-                    <button class="admin-tab active" data-tab="solicitudes">Solicitudes</button>
-                    <button class="admin-tab" data-tab="empleados">Empleados</button>
-                </div>
-                <div id="admin-tab-solicitudes" class="admin-tab-content">
-                    <div class="admin-dashboard">
-                        <div class="stats-grid" id="admin-stats">
-                            <!-- Admin stats will be loaded dynamically -->
-                        </div>
-                        <div class="filters-bar">
-                            <select id="admin-filter-departamento" class="filter-select">
-                                <option value="">Todos los departamentos</option>
-                            </select>
-                            <select id="admin-filter-tipo" class="filter-select">
-                                <option value="">Todos los tipos</option>
-                                <option value="permiso">Permiso</option>
-                                <option value="vacaciones">Vacaciones</option>
-                                <option value="otra">Otra</option>
-                            </select>
-                            <input type="date" id="admin-filter-fecha-inicio" class="filter-input">
-                            <input type="date" id="admin-filter-fecha-fin" class="filter-input">
-                            <div class="search-wrapper">
-                                <input type="text" id="admin-search-empleado" placeholder="Buscar empleado..." class="search-input">
-                                <span class="search-icon">🔍</span>
-                            </div>
-                        </div>
-                        <div id="admin-solicitudes-list" class="admin-solicitudes-list">
-                            <!-- Admin solicitudes will be loaded dynamically -->
-                        </div>
-                    </div>
-                </div>
-                <div id="admin-tab-empleados" class="admin-tab-content" style="display: none;">
-                    <div id="empleados-list" class="empleados-list">
-                        <!-- Lista de empleados se cargará aquí -->
-                    </div>
-                </div>
+            <!-- CONTENT AREA -->
+            <div class="content-area" id="contentArea">
             </div>
         </main>
     </div>
 
-    <!-- Keyboard Shortcuts Modal -->
-    <div id="keyboard-shortcuts-modal" class="keyboard-shortcuts-modal">
-        <div class="keyboard-shortcuts-content">
-            <h3>⌨️ Atajos de Teclado</h3>
-            <div id="shortcuts-list">
-                <!-- Shortcuts will be loaded dynamically -->
+    <!-- ============================================================
+         NOTIFICATION PANEL
+         ============================================================ -->
+    <div class="notif-overlay" id="notifOverlay" onclick="App.toggleNotifications()"></div>
+    <div class="notif-panel" id="notifPanel">
+        <div class="notif-panel-header">
+            <h3><i class="fas fa-bell" style="margin-right:8px;color:var(--primary);"></i>Notificaciones</h3>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-sm btn-outline" onclick="App.markAllNotifRead()">
+                    <i class="fas fa-check-double"></i> Marcar todo
+                </button>
+                <button class="modal-close" onclick="App.toggleNotifications()">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
-            <div class="form-actions">
-                <button type="button" class="btn btn-primary" onclick="document.getElementById('keyboard-shortcuts-modal').classList.remove('active')">Cerrar</button>
+        </div>
+        <div class="notif-panel-body" id="notifList">
+            <div class="notif-empty">
+                <i class="fas fa-bell-slash"></i>
+                <p>No hay notificaciones</p>
             </div>
         </div>
     </div>
 
-    <!-- Modals -->
-    <!-- Modal: Nuevo Comunicado -->
-    <div id="modal-comunicado" class="modal">
-        <div class="modal-content">
+    <!-- ============================================================
+         MODAL
+         ============================================================ -->
+    <div class="modal-overlay" id="modalOverlay" onclick="if(event.target===this)App.closeModal()">
+        <div class="modal">
             <div class="modal-header">
-                <h3>Nuevo Comunicado</h3>
-                <button class="modal-close">&times;</button>
+                <h3 id="modalTitle">Modal</h3>
+                <button class="modal-close" onclick="App.closeModal()">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
-            <form id="form-comunicado" class="form-container">
-                <div class="form-group">
-                    <label for="comunicado-departamento">Departamento <span class="required-indicator">*</span></label>
-                    <select id="comunicado-departamento" required aria-label="Seleccione el departamento">
-                        <option value="">Seleccione...</option>
-                    </select>
-                </div>
-                <div class="form-group" id="comunicado-categoria-group" style="display: none;">
-                    <label for="comunicado-categoria">Categoría <span class="required-indicator">*</span></label>
-                    <select id="comunicado-categoria" aria-label="Seleccione la categoría">
-                        <option value="">Seleccione...</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="comunicado-tipo">Tipo <span class="required-indicator">*</span></label>
-                    <select id="comunicado-tipo" required aria-label="Seleccione el tipo de comunicado">
-                        <option value="">Seleccione...</option>
-                        <option value="interno">Interno</option>
-                        <option value="externo">Externo</option>
-                    </select>
-                </div>
-                <div class="form-group" id="comunicado-subcategoria-container" style="display: none;">
-                    <label for="comunicado-subcategoria">Subcategoría <span class="required-indicator">*</span></label>
-                    <select id="comunicado-subcategoria" aria-label="Seleccione la subcategoría">
-                        <option value="">Seleccione...</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="comunicado-para">Para <span class="required-indicator">*</span></label>
-                    <input type="text" id="comunicado-para" required placeholder="Ej: Personal de Consulta Externa" minlength="3">
-                </div>
-                <div class="form-group">
-                    <label for="comunicado-de">De <span class="required-indicator">*</span></label>
-                    <input type="text" id="comunicado-de" required placeholder="Ej: Dirección Administrativa" minlength="3">
-                </div>
-                <div class="form-group">
-                    <label for="comunicado-asunto">Asunto <span class="required-indicator">*</span></label>
-                    <input type="text" id="comunicado-asunto" required placeholder="Ej: Notificación sobre cobros a colaboradores" minlength="3">
-                </div>
-                <div class="form-group">
-                    <label for="comunicado-contenido">
-                        Contenido <span class="required-indicator">*</span>
-                        <span id="comunicado-paginas-estimadas" class="paginas-estimadas" style="display: none;">
-                            (Aprox. <span id="comunicado-num-paginas">1</span> página)
-                        </span>
-                    </label>
-                    <textarea id="comunicado-contenido" rows="10" required placeholder="Escriba el contenido del comunicado...&#10;&#10;Nota: El sistema dividirá automáticamente el contenido en múltiples páginas si es muy largo." minlength="10"></textarea>
-                    <small class="form-hint">Escribe el contenido completo. El sistema calculará automáticamente cuántas páginas tendrá el PDF.</small>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Crear Comunicado</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- Modal: Ver Comunicado -->
-    <div id="modal-ver-comunicado" class="modal">
-        <div class="modal-content modal-content-large">
-            <div class="modal-header">
-                <h3>Comunicado</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div id="comunicado-documento" class="comunicado-documento">
-                <!-- El contenido se cargará dinámicamente -->
-            </div>
-            <div class="modal-footer" style="padding: 1rem; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 1rem;">
-                <button type="button" class="btn btn-secondary modal-close">Cerrar</button>
-                <button type="button" class="btn btn-secondary" id="btn-firmas-comunicado">Firmas</button>
-                <button type="button" class="btn btn-primary" id="btn-export-comunicado-detalle">Exportar PDF</button>
+            <div class="modal-body" id="modalBody">
             </div>
         </div>
     </div>
 
-    <!-- Modal: Firmas de Comunicado -->
-    <div id="modal-firmas-comunicado" class="modal">
-        <div class="modal-content" style="max-width: 800px;">
-            <div class="modal-header">
-                <h3>Firmas del Comunicado</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div class="modal-body" style="padding: 1.5rem;">
-                <div id="firmas-comunicado-lista" style="max-height: 500px; overflow-y: auto;">
-                    <!-- Lista de empleados se cargará aquí -->
-                </div>
-                <div id="firmar-comunicado-form" style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border-color);">
-                    <h4 style="margin-bottom: 1rem;">Firmar con código personal</h4>
-                    <div class="form-group">
-                        <label for="codigo-firma-personal">Código Personal <span class="required-indicator">*</span></label>
-                        <input type="text" id="codigo-firma-personal" placeholder="Ingrese su código personal" style="text-transform: uppercase;" oninput="this.value = this.value.toUpperCase()">
-                    </div>
-                    <button type="button" class="btn btn-primary" id="btn-firmar-comunicado">Firmar</button>
-                </div>
-            </div>
-            <div class="modal-footer" style="padding: 1rem; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 1rem;">
-                <button type="button" class="btn btn-secondary modal-close">Cerrar</button>
-            </div>
-        </div>
-    </div>
+    <!-- ============================================================
+         TOAST CONTAINER
+         ============================================================ -->
+    <div class="toast-container" id="toastContainer"></div>
 
-    <!-- Modal: Nuevo Empleado -->
-    <div id="modal-nuevo-empleado" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Nuevo Empleado</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <form id="form-empleado" class="form-container">
-                <div class="form-group">
-                    <label for="empleado-nombre">Nombre Completo <span class="required-indicator">*</span></label>
-                    <input type="text" id="empleado-nombre" required placeholder="Ej: Juan Pérez" minlength="3">
-                </div>
-                <div class="form-group">
-                    <label for="empleado-email">Email <span class="required-indicator">*</span></label>
-                    <input type="email" id="empleado-email" required placeholder="empleado@empresa.com">
-                </div>
-                <div class="form-group">
-                    <label for="empleado-departamento">Departamento <span class="required-indicator">*</span></label>
-                    <select id="empleado-departamento" required>
-                        <option value="">Seleccione...</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="empleado-codigo-personal">Código Personal</label>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <input type="text" id="empleado-codigo-personal" readonly style="flex: 1; background: #f3f4f6; font-weight: 600; letter-spacing: 2px; text-align: center; font-size: 1.125rem;">
-                        <button type="button" class="btn btn-secondary" id="btn-generar-codigo" title="Generar nuevo código">🔄 Generar</button>
-                    </div>
-                    <small class="form-hint">Este código se generará automáticamente y será usado para firmar comunicados.</small>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Crear Empleado</button>
-                </div>
-            </form>
-        </div>
-    </div>
+    <!-- ============================================================
+         FIREBASE SDK (Compat v9)
+         ============================================================ -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 
-    <!-- Modal: Nueva Solicitud -->
-    <div id="modal-solicitud" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Nueva Solicitud</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <form id="form-solicitud" class="form-container">
-                <div class="form-group">
-                    <label for="solicitud-tipo">Tipo de Solicitud *</label>
-                    <select id="solicitud-tipo" required>
-                        <option value="">Seleccione...</option>
-                        <option value="permiso">Permiso sin goce de salario</option>
-                        <option value="vacaciones">Vacaciones</option>
-                        <option value="otra">Otra solicitud</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="solicitud-departamento">Departamento *</label>
-                    <select id="solicitud-departamento" required>
-                        <option value="">Seleccione...</option>
-                    </select>
-                </div>
-                <div id="solicitud-fields">
-                    <!-- Dynamic fields based on type -->
-                </div>
-                <div class="form-group">
-                    <label>Firma Digital del Empleado *</label>
-                    <div class="signature-container">
-                        <canvas id="signature-canvas-solicitud" width="500" height="200"></canvas>
-                        <div class="signature-actions">
-                            <button type="button" id="clear-signature-solicitud" class="btn btn-secondary">Limpiar Firma</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary modal-close">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Enviar Solicitud</button>
-                </div>
-            </form>
-        </div>
-    </div>
+    <!-- ============================================================
+         PDF GENERATION LIBRARIES
+         ============================================================ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
-    <!-- Modal: Detalle Solicitud (Admin) -->
-    <div id="modal-solicitud-detalle" class="modal">
-        <div class="modal-content modal-large">
-            <div class="modal-header">
-                <h3>Detalle de Solicitud</h3>
-                <button class="modal-close">&times;</button>
-            </div>
-            <div id="solicitud-detalle-content" class="solicitud-detalle">
-                <!-- Solicitud details will be loaded dynamically -->
-            </div>
-            <div class="admin-actions" id="admin-actions" style="display: none;">
-                <div class="form-group">
-                    <label for="justificacion">Justificación (requerida para rechazo)</label>
-                    <textarea id="justificacion" rows="3"></textarea>
-                </div>
-                <div class="form-group">
-                    <label>Firma Digital *</label>
-                    <div class="signature-container">
-                        <canvas id="signature-canvas" width="500" height="200"></canvas>
-                        <div class="signature-actions">
-                            <button type="button" id="clear-signature" class="btn btn-secondary">Limpiar</button>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="window.app.exportSolicitudPDF(window.app.currentSolicitudId)" title="Exportar a PDF">
-                        📄 Exportar PDF
-                    </button>
-                    <button type="button" id="btn-aprobar" class="btn btn-success">Aprobar</button>
-                    <button type="button" id="btn-rechazar" class="btn btn-danger">Rechazar</button>
-                    <button type="button" id="btn-revision" class="btn btn-warning">Marcar en Revisión</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- ============================================================
+         APP SCRIPTS
+         ============================================================ -->
+    <script src="js/firebase-config.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/notifications.js"></script>
+    <script src="js/documents.js"></script>
+    <script src="js/requests.js"></script>
+    <script src="js/departamentos.js"></script>
+    <script src="js/pdf-generator.js"></script>
+    <script src="js/app.js"></script>
 
-    <!-- Scripts -->
-    <script type="module" src="js/database.js"></script>
-    <script type="module" src="js/auth.js"></script>
-    <script type="module" src="js/forms.js"></script>
-    <script type="module" src="js/signature.js"></script>
-    <script type="module" src="js/notifications.js"></script>
-    <!-- Dark mode disabled - using light mode only -->
-    <script type="module" src="js/keyboard-shortcuts.js"></script>
-    <script type="module" src="js/charts.js"></script>
-    <script type="module" src="js/vacation-calendar.js"></script>
-    <script type="module" src="js/templates.js"></script>
-    <script type="module" src="js/export.js"></script>
-    <script type="module" src="js/quick-actions.js"></script>
-    <script type="module" src="js/reminders.js"></script>
-    <script type="module" src="js/solicitudes-enhancements.js"></script>
-    <script type="module" src="js/solicitudes-timeline.js"></script>
-    <script type="module" src="js/app.js"></script>
 </body>
 </html>
-

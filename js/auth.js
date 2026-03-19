@@ -1,270 +1,305 @@
-/**
- * Authentication Manager
- * Handles user authentication, JWT tokens, and password encryption
- */
+// ============================================================
+// AUTH.JS - Firebase Authentication + User Profile Management
+// Veterinaria San Martín de Porres
+// ============================================================
 
-import db from './database.js';
-import { showNotification } from './notifications.js';
+class AuthManager {
+    static currentUser = null;      // Firebase Auth user
+    static currentProfile = null;   // Profile from Realtime DB
+    static _profileListener = null;
 
-class Auth {
-    constructor() {
-        this.tokenKey = 'auth_token';
-        this.userKey = 'user';
-        this.tokenExpiry = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
-    }
-
-    /**
-     * Encrypt password using Web Crypto API
-     */
-    async encryptPassword(password) {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(password);
-        const hash = await crypto.subtle.digest('SHA-256', data);
-        return Array.from(new Uint8Array(hash))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
-    }
-
-    /**
-     * Generate JWT-like token (simplified for client-side)
-     */
-    generateToken(user) {
-        const payload = {
-            id: user.id,
-            email: user.email,
-            rol: user.rol,
-            exp: Date.now() + this.tokenExpiry
-        };
-        return btoa(JSON.stringify(payload));
-    }
-
-    /**
-     * Decode and validate token
-     */
-    validateToken(token) {
-        try {
-            const payload = JSON.parse(atob(token));
-            if (payload.exp && payload.exp > Date.now()) {
-                return payload;
-            }
-            return null;
-        } catch {
-            return null;
-        }
-    }
-
-    /**
-     * Get current user from token
-     */
-    getCurrentUser() {
-        const token = localStorage.getItem(this.tokenKey);
-        if (!token) return null;
-
-        const payload = this.validateToken(token);
-        if (!payload) {
-            this.logout();
-            return null;
-        }
-
-        const user = localStorage.getItem(this.userKey);
-        return user ? JSON.parse(user) : null;
-    }
-
-    /**
-     * Check if user is authenticated
-     */
-    isAuthenticated() {
-        const token = localStorage.getItem(this.tokenKey);
-        if (!token) {
-            return false;
-        }
-
-        const payload = this.validateToken(token);
-        if (!payload) {
-            // Don't auto-logout here to avoid infinite loops
-            // Just return false and let the calling code handle it
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * Check if user is admin
-     */
-    isAdmin() {
-        const user = this.getCurrentUser();
-        return user?.rol === 'admin';
-    }
-
-    /**
-     * Login user
-     */
-    async login(email, password) {
-        try {
-            // Ensure database is initialized
-            await db.ensureInit();
-            
-            // Get user from database
-            const user = await db.getUsuarioByEmail(email);
-            if (!user) {
-                throw new Error('Usuario no encontrado');
-            }
-
-            // Encrypt password and compare
-            const encryptedPassword = await this.encryptPassword(password);
-            if (user.password !== encryptedPassword) {
-                throw new Error('Contraseña incorrecta');
-            }
-
-            // Generate token
-            const token = this.generateToken(user);
-
-            // Store token and user
-            localStorage.setItem(this.tokenKey, token);
-            localStorage.setItem(this.userKey, JSON.stringify(user));
-
-            // Log audit (catch error to not block login if audit fails)
-            try {
-                await db.addAuditoria('LOGIN', { email: user.email });
-            } catch (auditError) {
-                console.warn('Failed to log audit:', auditError);
-            }
-
-            return { success: true, user };
-        } catch (error) {
-            console.error('Login error:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Logout user
-     */
-    async logout() {
-        try {
-            const user = this.getCurrentUser();
+    // Escucha cambios en el estado de autenticación
+    static initAuthListener(callback) {
+        auth.onAuthStateChanged(async (user) => {
             if (user) {
-                try {
-                    await db.ensureInit();
-                    await db.addAuditoria('LOGOUT', { email: user.email });
-                } catch (error) {
-                    console.warn('Failed to log audit on logout:', error);
+                this.currentUser = user;
+                // Cargar perfil del usuario desde Realtime Database
+                await this.loadProfile(user.uid);
+                if (this.currentProfile) {
+                    callback(true);
+                } else {
+                    callback(false);
                 }
+            } else {
+                this.currentUser = null;
+                this.currentProfile = null;
+                callback(false);
+            }
+        });
+    }
+
+    // Cargar perfil de usuario desde RTDB
+    static async loadProfile(uid) {
+        try {
+            const snapshot = await dbRef.users.child(uid).once('value');
+            if (snapshot.exists()) {
+                this.currentProfile = { id: uid, ...snapshot.val() };
+            } else {
+                this.currentProfile = null;
             }
         } catch (error) {
-            console.error('Error during logout:', error);
-        } finally {
-            localStorage.removeItem(this.tokenKey);
-            localStorage.removeItem(this.userKey);
-            window.location.reload();
+            console.error('Error cargando perfil:', error);
+            this.currentProfile = null;
         }
     }
 
-    /**
-     * Register new user (for initial setup)
-     */
-    async register(email, password, nombre, departamento, rol = 'usuario') {
+    // Escuchar cambios en tiempo real del perfil
+    static listenProfile(uid) {
+        if (this._profileListener) {
+            dbRef.users.child(this._profileListener).off();
+        }
+        this._profileListener = uid;
+        dbRef.users.child(uid).on('value', (snapshot) => {
+            if (snapshot.exists()) {
+                this.currentProfile = { id: uid, ...snapshot.val() };
+            }
+        });
+    }
+
+    // Login con email y password
+    static async login(email, password) {
         try {
-            // Check if user exists
-            const existingUser = await db.getUsuarioByEmail(email);
-            if (existingUser) {
-                throw new Error('El email ya está registrado');
+            const result = await auth.signInWithEmailAndPassword(email, password);
+            this.currentUser = result.user;
+            await this.loadProfile(result.user.uid);
+
+            if (!this.currentProfile) {
+                return { success: false, message: 'Perfil de usuario no encontrado en la base de datos' };
+            }
+            if (!this.currentProfile.activo) {
+                await auth.signOut();
+                return { success: false, message: 'Su cuenta está desactivada. Contacte al administrador.' };
             }
 
-            // Encrypt password
-            const encryptedPassword = await this.encryptPassword(password);
+            this.listenProfile(result.user.uid);
+            return { success: true, user: this.currentProfile };
+        } catch (error) {
+            console.error('Error login:', error);
+            let msg = 'Error al iniciar sesión';
+            switch (error.code) {
+                case 'auth/user-not-found': msg = 'No existe una cuenta con ese correo'; break;
+                case 'auth/wrong-password': msg = 'Contraseña incorrecta'; break;
+                case 'auth/invalid-email': msg = 'Correo electrónico inválido'; break;
+                case 'auth/user-disabled': msg = 'Esta cuenta ha sido deshabilitada'; break;
+                case 'auth/too-many-requests': msg = 'Demasiados intentos. Intente más tarde'; break;
+                case 'auth/invalid-credential': msg = 'Credenciales incorrectas'; break;
+            }
+            return { success: false, message: msg };
+        }
+    }
 
-            // Create user
-            const user = {
-                email,
-                password: encryptedPassword,
-                nombre,
-                departamento,
-                rol,
-                fechaRegistro: new Date().toISOString(),
-                activo: true
+    // Logout
+    static async logout() {
+        try {
+            if (this._profileListener) {
+                dbRef.users.child(this._profileListener).off();
+                this._profileListener = null;
+            }
+            await auth.signOut();
+            this.currentUser = null;
+            this.currentProfile = null;
+        } catch (error) {
+            console.error('Error logout:', error);
+        }
+    }
+
+    // Obtener usuario actual (perfil completo)
+    static getUser() {
+        return this.currentProfile;
+    }
+
+    // Verificar permisos
+    static hasPermission(permission) {
+        if (!this.currentProfile) return false;
+        const role = ROLES[this.currentProfile.rol];
+        if (!role) return false;
+        return role.permisos.includes('todo') || role.permisos.includes(permission);
+    }
+
+    static isAdmin() {
+        return this.currentProfile && this.currentProfile.rol === 'admin';
+    }
+
+    static isEncargado() {
+        return this.currentProfile && (this.currentProfile.rol === 'encargado' || this.currentProfile.rol === 'admin');
+    }
+
+    static getUserDepartment() {
+        return this.currentProfile ? this.currentProfile.departamento : null;
+    }
+
+    // ========================================================
+    // CRUD de Usuarios (Admin)
+    // ========================================================
+
+    // Obtener todos los usuarios
+    static async getAllUsers() {
+        try {
+            console.log('Obteniendo usuarios de Firebase...');
+            const snapshot = await dbRef.users.once('value');
+            console.log('Snapshot recibido:', snapshot.exists() ? 'existe' : 'no existe');
+            
+            if (!snapshot.exists()) {
+                console.log('No hay usuarios en la base de datos');
+                return [];
+            }
+            
+            const users = snapshotToArray(snapshot);
+            console.log(`Usuarios encontrados: ${users.length}`, users);
+            return users;
+        } catch (error) {
+            console.error('Error obteniendo usuarios:', error);
+            console.error('Detalles del error:', error.code, error.message);
+            return [];
+        }
+    }
+
+    // Obtener usuario por ID
+    static async getUserById(uid) {
+        try {
+            const snapshot = await dbRef.users.child(uid).once('value');
+            if (snapshot.exists()) {
+                return { id: uid, ...snapshot.val() };
+            }
+            return null;
+        } catch (error) {
+            console.error('Error obteniendo usuario:', error);
+            return null;
+        }
+    }
+
+    // Crear usuario (Firebase Auth + perfil en RTDB)
+    static async createUser(userData) {
+        try {
+            // Guardar el usuario actual antes de crear uno nuevo
+            const currentUserAuth = auth.currentUser;
+            const currentEmail = this.currentProfile.email;
+            const currentPassword = userData._adminPassword; // necesitamos esto para re-autenticar
+
+            // Crear usuario en Firebase Auth
+            // Usamos la API REST de Firebase Auth para no desloguear al admin
+            const response = await fetch(
+                `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${firebaseConfig.apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: userData.email,
+                        password: userData.password,
+                        returnSecureToken: false
+                    })
+                }
+            );
+
+            const result = await response.json();
+
+            if (result.error) {
+                let msg = 'Error al crear usuario';
+                if (result.error.message === 'EMAIL_EXISTS') msg = 'Ya existe una cuenta con ese correo';
+                if (result.error.message === 'WEAK_PASSWORD') msg = 'La contraseña debe tener al menos 6 caracteres';
+                if (result.error.message === 'INVALID_EMAIL') msg = 'Correo electrónico inválido';
+                return { success: false, message: msg };
+            }
+
+            const newUid = result.localId;
+
+            // Crear perfil en Realtime Database
+            const profile = {
+                nombre: userData.nombre,
+                apellido: userData.apellido,
+                email: userData.email,
+                rol: userData.rol,
+                departamento: userData.departamento,
+                activo: true,
+                fechaCreacion: new Date().toISOString()
             };
 
-            const userId = await db.add('usuarios', user);
-            user.id = userId;
+            await dbRef.users.child(newUid).set(profile);
 
-            await db.addAuditoria('REGISTER', { email, rol });
-
-            return { success: true, user };
+            return { success: true, user: { id: newUid, ...profile } };
         } catch (error) {
-            console.error('Register error:', error);
-            throw error;
+            console.error('Error creando usuario:', error);
+            return { success: false, message: 'Error al crear usuario: ' + error.message };
+        }
+    }
+
+    // Actualizar perfil de usuario en RTDB
+    static async updateUser(uid, updates) {
+        try {
+            // No enviar campos undefined o internos
+            const cleanUpdates = {};
+            if (updates.nombre !== undefined) cleanUpdates.nombre = updates.nombre;
+            if (updates.apellido !== undefined) cleanUpdates.apellido = updates.apellido;
+            if (updates.email !== undefined) cleanUpdates.email = updates.email;
+            if (updates.rol !== undefined) cleanUpdates.rol = updates.rol;
+            if (updates.departamento !== undefined) cleanUpdates.departamento = updates.departamento;
+            if (updates.activo !== undefined) cleanUpdates.activo = updates.activo;
+
+            await dbRef.users.child(uid).update(cleanUpdates);
+
+            // Si es el usuario actual, recargar perfil
+            if (this.currentUser && this.currentUser.uid === uid) {
+                await this.loadProfile(uid);
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error actualizando usuario:', error);
+            return { success: false, message: error.message };
+        }
+    }
+
+    // Actualizar código personal de firma
+    static async updateUserCode(uid, codigoPersonal) {
+        try {
+            await dbRef.users.child(uid).update({ codigoPersonal: codigoPersonal });
+
+            // Si es el usuario actual, recargar perfil
+            if (this.currentUser && this.currentUser.uid === uid) {
+                await this.loadProfile(uid);
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error actualizando código personal:', error);
+            return { success: false, message: error.message };
+        }
+    }
+
+    // Desactivar usuario
+    static async deleteUser(uid) {
+        try {
+            await dbRef.users.child(uid).update({ activo: false });
+            return { success: true };
+        } catch (error) {
+            console.error('Error desactivando usuario:', error);
+            return { success: false, message: error.message };
+        }
+    }
+
+    // Obtener usuarios por departamento
+    static async getUsersByDepartment(depId) {
+        try {
+            const snapshot = await dbRef.users.orderByChild('departamento').equalTo(depId).once('value');
+            return snapshotToArray(snapshot).filter(u => u.activo);
+        } catch (error) {
+            console.error('Error:', error);
+            return [];
+        }
+    }
+
+    // Obtener encargados de departamento
+    static async getEncargadosDepartamento(depId) {
+        try {
+            const users = await this.getAllUsers();
+            return users.filter(u =>
+                u.departamento === depId &&
+                (u.rol === 'encargado' || u.rol === 'admin') &&
+                u.activo
+            );
+        } catch (error) {
+            console.error('Error:', error);
+            return [];
         }
     }
 }
-
-// Export singleton instance
-const auth = new Auth();
-
-// Initialize default admin user if database is empty
-(async () => {
-    try {
-        await db.ensureInit();
-        const usuarios = await db.getAll('usuarios');
-        if (usuarios.length === 0) {
-            // Create default admin user
-            const defaultAdmin = {
-                email: 'admin@sistema.com',
-                password: await auth.encryptPassword('admin123'),
-                nombre: 'Administrador',
-                departamento: 'IT',
-                rol: 'admin',
-                fechaRegistro: new Date().toISOString(),
-                activo: true
-            };
-            await db.add('usuarios', defaultAdmin);
-            
-            // Create default departments
-            const departamentos = [
-                { codigo: 'GG', nombre: 'Gerencia General' },
-                { codigo: 'IT', nombre: 'Tecnología de la Información' },
-                { codigo: 'RH', nombre: 'Recursos Humanos' },
-                { codigo: 'FI', nombre: 'Finanzas' },
-                { codigo: 'MK', nombre: 'Mercadeo' },
-                { codigo: 'OP', nombre: 'Operaciones' },
-                { codigo: 'IN', nombre: 'Internos Documentos' }
-            ];
-            
-            for (const dept of departamentos) {
-                // Verificar si el departamento ya existe antes de agregarlo
-                const existing = await db.query('departamentos', 'codigo', dept.codigo);
-                if (existing.length === 0) {
-                    await db.add('departamentos', dept);
-                }
-            }
-        } else {
-            // Si ya hay usuarios, verificar y agregar departamentos faltantes
-            const departamentosRequeridos = [
-                { codigo: 'GG', nombre: 'Gerencia General' },
-                { codigo: 'IT', nombre: 'Tecnología de la Información' },
-                { codigo: 'RH', nombre: 'Recursos Humanos' },
-                { codigo: 'FI', nombre: 'Finanzas' },
-                { codigo: 'MK', nombre: 'Mercadeo' },
-                { codigo: 'OP', nombre: 'Operaciones' },
-                { codigo: 'IN', nombre: 'Internos Documentos' }
-            ];
-            
-            for (const dept of departamentosRequeridos) {
-                try {
-                    const existing = await db.query('departamentos', 'codigo', dept.codigo);
-                    if (existing.length === 0) {
-                        await db.add('departamentos', dept);
-                        console.log(`Departamento agregado: ${dept.codigo} - ${dept.nombre}`);
-                    }
-                } catch (error) {
-                    console.warn(`No se pudo agregar el departamento ${dept.codigo}:`, error);
-                }
-            }
-        }
-    } catch (error) {
-        console.error('Error initializing default data:', error);
-    }
-})();
-
-export default auth;
-

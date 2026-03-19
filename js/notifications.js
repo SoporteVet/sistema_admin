@@ -1,110 +1,145 @@
-/**
- * Notifications Manager
- * Handles user notifications and alerts
- */
+// ============================================================
+// NOTIFICATIONS.JS - Sistema de Notificaciones con Firebase RTDB
+// Veterinaria San Martín de Porres
+// ============================================================
 
-/**
- * Show notification to user with enhanced UI
- */
-export function showNotification(message, type = 'info', duration = 4000) {
-    // Remove existing notifications
-    const existing = document.querySelectorAll('.notification');
-    existing.forEach(n => n.remove());
+class NotificationManager {
+    static _listener = null;
+    static _onUpdateCallback = null;
 
-    // Icons for different notification types
-    const icons = {
-        success: '✓',
-        error: '✕',
-        warning: '⚠',
-        info: 'ℹ'
-    };
-
-    // Create notification element with enhanced structure
-    const notification = document.createElement('div');
-    notification.className = `notification notification-${type}`;
-    
-    notification.innerHTML = `
-        <span class="notification-icon">${icons[type] || icons.info}</span>
-        <span class="notification-content">${message}</span>
-        <button class="notification-close" aria-label="Cerrar notificación">&times;</button>
-    `;
-
-    // Add to DOM
-    document.body.appendChild(notification);
-
-    // Close button handler
-    const closeBtn = notification.querySelector('.notification-close');
-    closeBtn.addEventListener('click', () => {
-        removeNotification(notification);
-    });
-
-    // Auto remove after duration
-    const timeoutId = setTimeout(() => {
-        removeNotification(notification);
-    }, duration);
-
-    // Add slide in animation
-    requestAnimationFrame(() => {
-        notification.style.animation = 'slideInRight 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-    });
-
-    // Store timeout ID on element for cleanup
-    notification._timeoutId = timeoutId;
-}
-
-/**
- * Remove notification with animation
- */
-function removeNotification(notification) {
-    if (notification._timeoutId) {
-        clearTimeout(notification._timeoutId);
+    // Obtener todas las notificaciones de un usuario
+    static async getByUser(userId) {
+        try {
+            const snapshot = await dbRef.notifications
+                .orderByChild('destinatario')
+                .equalTo(userId)
+                .once('value');
+            return snapshotToArray(snapshot)
+                .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+        } catch (error) {
+            console.error('Error obteniendo notificaciones:', error);
+            return [];
+        }
     }
-    
-    notification.style.animation = 'slideOutRight 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
-    setTimeout(() => {
-        if (notification.parentNode) {
-            notification.remove();
-        }
-    }, 300);
-}
 
-// Add animation styles
-if (!document.getElementById('notification-animations')) {
-    const style = document.createElement('style');
-    style.id = 'notification-animations';
-    style.textContent = `
-        @keyframes slideInRight {
-            from {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        @keyframes slideOutRight {
-            from {
-                transform: translateX(0);
-                opacity: 1;
-            }
-            to {
-                transform: translateX(100%);
-                opacity: 0;
-            }
-        }
-    `;
-    document.head.appendChild(style);
-}
-
-/**
- * Confirm dialog
- */
-export function showConfirm(message, callback) {
-    const confirmed = confirm(message);
-    if (callback) {
-        callback(confirmed);
+    // Obtener no leídas
+    static async getUnread(userId) {
+        const all = await this.getByUser(userId);
+        return all.filter(n => !n.leida);
     }
-    return confirmed;
-}
 
+    // Obtener conteo de no leídas
+    static async getUnreadCount(userId) {
+        const unread = await this.getUnread(userId);
+        return unread.length;
+    }
+
+    // Crear notificación
+    static async create(notifData) {
+        try {
+            const newNotifRef = dbRef.notifications.push();
+            const newNotif = {
+                tipo: notifData.tipo,
+                titulo: notifData.titulo,
+                mensaje: notifData.mensaje,
+                destinatario: notifData.destinatario,
+                referencia: notifData.referencia || null,
+                referenciaType: notifData.referenciaType || null,
+                fecha: new Date().toISOString(),
+                leida: false
+            };
+            await newNotifRef.set(newNotif);
+            return { id: newNotifRef.key, ...newNotif };
+        } catch (error) {
+            console.error('Error creando notificación:', error);
+            return null;
+        }
+    }
+
+    // Marcar como leída
+    static async markAsRead(notifId) {
+        try {
+            await dbRef.notifications.child(notifId).update({ leida: true });
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    // Marcar todas como leídas
+    static async markAllAsRead(userId) {
+        try {
+            const notifications = await this.getByUser(userId);
+            const updates = {};
+            notifications.forEach(n => {
+                if (!n.leida) {
+                    updates[`${n.id}/leida`] = true;
+                }
+            });
+            if (Object.keys(updates).length > 0) {
+                await dbRef.notifications.update(updates);
+            }
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    // Eliminar notificación
+    static async delete(notifId) {
+        try {
+            await dbRef.notifications.child(notifId).remove();
+        } catch (error) {
+            console.error('Error:', error);
+        }
+    }
+
+    // Escuchar notificaciones en tiempo real para un usuario
+    static listenForUser(userId, callback) {
+        this.stopListening();
+        this._onUpdateCallback = callback;
+
+        this._listener = dbRef.notifications
+            .orderByChild('destinatario')
+            .equalTo(userId);
+
+        this._listener.on('value', (snapshot) => {
+            const notifications = snapshotToArray(snapshot)
+                .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+            const unread = notifications.filter(n => !n.leida).length;
+            if (this._onUpdateCallback) {
+                this._onUpdateCallback(notifications, unread);
+            }
+        });
+    }
+
+    // Dejar de escuchar
+    static stopListening() {
+        if (this._listener) {
+            this._listener.off();
+            this._listener = null;
+        }
+    }
+
+    static getIcon(tipo) {
+        const icons = {
+            'firma_requerida': 'fas fa-signature',
+            'documento_firmado': 'fas fa-check-circle',
+            'solicitud_nueva': 'fas fa-bell',
+            'solicitud_aprobada': 'fas fa-thumbs-up',
+            'solicitud_rechazada': 'fas fa-thumbs-down',
+            'general': 'fas fa-info-circle'
+        };
+        return icons[tipo] || icons['general'];
+    }
+
+    static getColor(tipo) {
+        const colors = {
+            'firma_requerida': '#1565c0',
+            'documento_firmado': '#2e7d32',
+            'solicitud_nueva': '#f57f17',
+            'solicitud_aprobada': '#2e7d32',
+            'solicitud_rechazada': '#c62828',
+            'general': '#546e7a'
+        };
+        return colors[tipo] || colors['general'];
+    }
+}
