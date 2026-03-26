@@ -9,10 +9,32 @@ const APP_CONFIG = {
     version: '2.0.0'
 };
 
+// Flujo en dos pasos: revisión TI (TI-500) → resolución Gerencia General (DG-100)
+const SOLICITUD_HORAS_EXTRA_CONFIG = {
+    deptoTI: 'TI-500',
+    deptoGerencia: 'DG-100',
+    tipo: 'horas_extraordinarias'
+};
+
 // ============================================================
 // DEPARTAMENTOS Y TIPOS DE DOCUMENTOS
 // ============================================================
 const DEPARTAMENTOS = {
+    'TI-500': {
+        nombre: 'Tecnologías de Información',
+        codigo: 'TI-500',
+        color: '#006064',
+        icono: 'fas fa-laptop-code',
+        categorias: {
+            '1': {
+                nombre: 'Comunicaciones Oficiales',
+                subcategorias: {
+                    '1.1': 'Comunicación oficial interna',
+                    '1.2': 'Comunicación oficial externa'
+                }
+            }
+        }
+    },
     'DG-100': {
         nombre: 'Gerencia General',
         codigo: 'DG-100',
@@ -237,6 +259,12 @@ const DEPARTAMENTOS = {
                     '4.1': 'Informe de ingreso de paciente al área de internamiento',
                     '4.2': 'Hojas de anestesia'
                 }
+            },
+            '5': {
+                nombre: 'Solicitudes laborales',
+                subcategorias: {
+                    '5.1': 'Reporte y autorización de horas extraordinarias (RC.400.5.1)'
+                }
             }
         }
     }
@@ -271,7 +299,7 @@ const TIPOS_SOLICITUD = {
         nombre: 'Disfrute de Vacaciones',
         icono: 'fas fa-umbrella-beach',
         color: '#00897b',
-        campos: ['fecha_inicio', 'fecha_fin', 'observaciones']
+        campos: ['cedula', 'puesto', 'fecha_ingreso', 'fecha_inicio', 'fecha_fin', 'observaciones']
     },
     'sin_goce': {
         nombre: 'Permiso Sin Goce de Salario',
@@ -308,6 +336,13 @@ const TIPOS_SOLICITUD = {
         icono: 'fas fa-star',
         color: '#fdd835',
         campos: ['fecha', 'descripcion']
+    },
+    'horas_extraordinarias': {
+        nombre: 'Horas extraordinarias',
+        icono: 'fas fa-business-time',
+        color: '#37474f',
+        campos: ['cedula', 'puesto', 'area_departamento', 'jefatura_inmediata', 'filas_horas'],
+        flujoTiGerencia: true
     }
 };
 

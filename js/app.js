@@ -45,6 +45,18 @@ class App {
         }
     }
 
+    static etiquetaEstadoSolicitud(estado) {
+        if (estado === 'pendiente_ti') return 'En revisión TI';
+        if (estado === 'pendiente_gerencia') return 'En Gerencia';
+        if (estado === 'pendiente') return 'Pendiente';
+        return estado ? estado.charAt(0).toUpperCase() + estado.slice(1) : '';
+    }
+
+    static claseCardEstadoSolicitud(estado) {
+        if (estado === 'pendiente_ti' || estado === 'pendiente_gerencia') return 'pendiente';
+        return estado || 'pendiente';
+    }
+
     // ========================================================
     // LOGIN
     // ========================================================
@@ -227,8 +239,8 @@ class App {
             RequestManager.getStats(),
             DocumentManager.getByDepartment(user.departamento),
             AuthManager.isEncargado()
-                ? RequestManager.getPendingByDepartment(user.departamento)
-                : RequestManager.getByUser(user.id).then(reqs => reqs.filter(r => r.estado === 'pendiente'))
+                ? RequestManager.getPendingActionsForUser(user)
+                : RequestManager.getByUser(user.id).then(reqs => reqs.filter(r => RequestManager.isEstadoPendienteEmpleado(r.estado)))
         ]);
 
         const content = document.getElementById('contentArea');
@@ -313,7 +325,7 @@ class App {
                                     <div class="request-card status-pendiente" style="cursor:pointer;" onclick="App.navigate('${AuthManager.isEncargado() ? 'gestionar-solicitudes' : 'solicitudes'}')">
                                         <div class="request-header">
                                             <h4>${req.tipoNombre}</h4>
-                                            <span class="status-badge pendiente"><i class="fas fa-clock"></i> Pendiente</span>
+                                            <span class="status-badge pendiente"><i class="fas fa-clock"></i> ${App.etiquetaEstadoSolicitud(req.estado)}</span>
                                         </div>
                                         <div style="font-size:0.82rem;color:var(--text-secondary);">
                                             <span>${req.solicitanteNombre}</span> • <span>${timeAgo(req.fechaSolicitud)}</span>
@@ -1316,7 +1328,7 @@ class App {
                 <div class="card-body">
                     <div class="tabs" id="reqTabs">
                         <button class="tab active" data-tab="todas" onclick="App.filterRequests('todas')">Todas (${requests.length})</button>
-                        <button class="tab" data-tab="pendiente" onclick="App.filterRequests('pendiente')">Pendientes (${requests.filter(r=>r.estado==='pendiente').length})</button>
+                        <button class="tab" data-tab="pendiente" onclick="App.filterRequests('pendiente')">Pendientes (${requests.filter(r=>RequestManager.isEstadoPendienteEmpleado(r.estado)).length})</button>
                         <button class="tab" data-tab="aprobada" onclick="App.filterRequests('aprobada')">Aprobadas (${requests.filter(r=>r.estado==='aprobada').length})</button>
                         <button class="tab" data-tab="rechazada" onclick="App.filterRequests('rechazada')">Rechazadas (${requests.filter(r=>r.estado==='rechazada').length})</button>
                     </div>
@@ -1351,16 +1363,22 @@ class App {
                     ${datos.hora_ingreso ? `<div class="date-item"><label>Hora ingreso</label><span>${datos.hora_ingreso}</span></div>` : ''}
                     ${datos.hora_salida ? `<div class="date-item"><label>Hora salida</label><span>${datos.hora_salida}</span></div>` : ''}
                 </div>`;
+            } else if (req.tipo === 'horas_extraordinarias' && Array.isArray(datos.filas) && datos.filas.length) {
+                const n = datos.filas.length;
+                datesHtml = `<div class="request-dates"><div class="date-item"><label>Registros</label><span>${n} fila(s) de horas</span></div></div>`;
             }
 
-            return `<div class="request-card status-${req.estado}">
+            const cardEst = this.claseCardEstadoSolicitud(req.estado);
+            const pendienteUi = RequestManager.isEstadoPendienteEmpleado(req.estado);
+            return `<div class="request-card status-${cardEst}">
                 <div class="request-header">
                     <h4><i class="${TIPOS_SOLICITUD[req.tipo]?.icono || 'fas fa-file'}" style="margin-right:8px;color:${TIPOS_SOLICITUD[req.tipo]?.color || 'var(--primary)'};"></i>${req.tipoNombre}</h4>
-                    <span class="status-badge ${req.estado}"><i class="fas fa-${req.estado === 'pendiente' ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${req.estado.charAt(0).toUpperCase() + req.estado.slice(1)}</span>
+                    <span class="status-badge ${cardEst}"><i class="fas fa-${pendienteUi ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${this.etiquetaEstadoSolicitud(req.estado)}</span>
                 </div>
                 ${datesHtml}
                 ${req.observaciones ? `<p style="font-size:0.85rem;color:var(--text-secondary);padding:10px;background:var(--bg-main);border-radius:var(--radius-sm);border-left:3px solid var(--primary);margin-bottom:10px;"><strong>Observaciones:</strong> ${req.observaciones}</p>` : ''}
                 ${datos.motivo ? `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px;"><strong>Motivo:</strong> ${datos.motivo}</p>` : ''}
+                ${req.revisionTI?.nombre ? `<p style="font-size:0.78rem;color:var(--text-secondary);padding:8px;background:var(--bg-main);border-radius:var(--radius-sm);margin-bottom:8px;"><strong>Revisión TI:</strong> ${req.revisionTI.nombre} — ${formatDateTime(req.revisionTI.fecha)}</p>` : ''}
                 ${req.justificacion ? `<p style="font-size:0.85rem;padding:10px;background:rgba(245,127,23,0.08);border-radius:var(--radius-sm);border-left:3px solid var(--warning);margin-bottom:10px;"><strong>Respuesta:</strong> ${req.justificacion}</p>` : ''}
                 ${req.respondidoPorNombre ? `<p style="font-size:0.78rem;color:var(--text-light);">Respondido por: ${req.respondidoPorNombre} — ${formatDateTime(req.fechaRespuesta)}</p>` : ''}
                 <p style="font-size:0.78rem;color:var(--text-light);margin-top:5px;">Solicitado: ${formatDateTime(req.fechaSolicitud)}</p>
@@ -1372,7 +1390,8 @@ class App {
         document.querySelectorAll('#reqTabs .tab').forEach(t => t.classList.remove('active'));
         document.querySelector(`#reqTabs .tab[data-tab="${status}"]`)?.classList.add('active');
         let requests = this._cachedRequests;
-        if (status !== 'todas') requests = requests.filter(r => r.estado === status);
+        if (status === 'pendiente') requests = requests.filter(r => RequestManager.isEstadoPendienteEmpleado(r.estado));
+        else if (status !== 'todas') requests = requests.filter(r => r.estado === status);
         document.getElementById('reqListContainer').innerHTML = this.renderRequestList(requests);
     }
 
@@ -1414,6 +1433,11 @@ class App {
         const selected = document.querySelector(`.req-type-card[data-type="${type}"]`);
         if (selected) { selected.style.borderColor = TIPOS_SOLICITUD[type]?.color || 'var(--primary)'; selected.style.background = 'rgba(21, 101, 192, 0.03)'; }
 
+        if (type === 'horas_extraordinarias') {
+            this.selectRequestTypeHorasExtra();
+            return;
+        }
+
         const container = document.getElementById('reqFormContainer');
         container.style.display = 'block';
         const tipo = TIPOS_SOLICITUD[type];
@@ -1428,6 +1452,15 @@ class App {
         }
         if (tipo.campos.includes('hora_ingreso')) fieldsHtml += `<div class="form-group"><label>Hora de Ingreso</label><input type="time" class="form-control" id="reqHoraIngreso"></div>`;
         if (tipo.campos.includes('hora_salida')) fieldsHtml += `<div class="form-group"><label>Hora de Salida</label><input type="time" class="form-control" id="reqHoraSalida"></div>`;
+        if (tipo.campos.includes('cedula') || tipo.campos.includes('puesto')) {
+            fieldsHtml += `<div class="form-row">
+                ${tipo.campos.includes('cedula') ? '<div class="form-group"><label>Número de cédula <span class="required">*</span></label><input type="text" class="form-control" id="reqCedula" placeholder="Ej: 1-2345-6789" required></div>' : ''}
+                ${tipo.campos.includes('puesto') ? '<div class="form-group"><label>Puesto <span class="required">*</span></label><input type="text" class="form-control" id="reqPuesto" placeholder="Ej: Analista Administrativo" required></div>' : ''}
+            </div>`;
+        }
+        if (tipo.campos.includes('fecha_ingreso')) {
+            fieldsHtml += `<div class="form-group"><label>Fecha de ingreso a la empresa <span class="required">*</span></label><input type="date" class="form-control" id="reqFechaIngreso" required></div>`;
+        }
         if (tipo.campos.includes('horario_actual')) {
             fieldsHtml += `<div class="form-row"><div class="form-group"><label>Horario Actual</label><input type="text" class="form-control" id="reqHorarioActual" placeholder="Ej: 8:00 AM - 5:00 PM"></div>
                 <div class="form-group"><label>Horario Solicitado</label><input type="text" class="form-control" id="reqHorarioSolicitado" placeholder="Ej: 9:00 AM - 6:00 PM"></div></div>`;
@@ -1465,7 +1498,7 @@ class App {
         `;
 
         // Inicializar y actualizar previsualización para todos los tipos
-        const previewInputIds = ['reqFechaInicio', 'reqFechaFin', 'reqFecha', 'reqHoraIngreso', 'reqHoraSalida', 'reqHorarioActual', 'reqHorarioSolicitado', 'reqInstitucion', 'reqDescripcion', 'reqMotivo', 'reqObservaciones'];
+        const previewInputIds = ['reqCedula', 'reqPuesto', 'reqFechaIngreso', 'reqFechaInicio', 'reqFechaFin', 'reqFecha', 'reqHoraIngreso', 'reqHoraSalida', 'reqHorarioActual', 'reqHorarioSolicitado', 'reqInstitucion', 'reqDescripcion', 'reqMotivo', 'reqObservaciones'];
         const update = () => App.updateRequestPreview(type);
         previewInputIds.forEach(id => {
             const el = document.getElementById(id);
@@ -1475,10 +1508,200 @@ class App {
         App.updateRequestPreview(type);
     }
 
+    static selectRequestTypeHorasExtra() {
+        const container = document.getElementById('reqFormContainer');
+        container.style.display = 'block';
+        const tipo = TIPOS_SOLICITUD.horas_extraordinarias;
+        const fila = (i) => `
+            <tr data-he-row="${i}">
+                <td style="padding:6px;"><input type="date" class="form-control he-fecha" style="min-width:130px;"></td>
+                <td style="padding:6px;"><input type="time" class="form-control he-inicio"></td>
+                <td style="padding:6px;"><input type="time" class="form-control he-fin"></td>
+                <td style="padding:6px;"><input type="text" class="form-control he-cantidad" placeholder="Auto" readonly></td>
+                <td style="padding:6px;"><input type="text" class="form-control he-justif" placeholder="Justificación"></td>
+                <td style="padding:6px;width:44px;"><button type="button" class="btn btn-outline btn-sm" onclick="App.removeHorasExtraRow(${i})" title="Quitar fila"><i class="fas fa-times"></i></button></td>
+            </tr>`;
+        let rowsHtml = '';
+        for (let i = 0; i < 4; i++) rowsHtml += fila(i);
+
+        const previewHtml = `
+            <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border-light);">
+                <h4 style="margin-bottom:8px;font-size:0.8rem;color:var(--text-light);text-transform:uppercase;letter-spacing:0.12em;">Previsualización</h4>
+                <div id="reqPreviewBox" style="border:1px solid var(--border);border-radius:var(--radius-md);padding:14px 16px;background:#f9fafb;max-height:320px;overflow:auto;">
+                    <pre id="reqPreviewText" style="white-space:pre-wrap;font-family:'Times New Roman', serif;font-size:0.9rem;line-height:1.5;margin:0;"></pre>
+                </div>
+                <p style="margin-top:6px;font-size:0.75rem;color:var(--text-light);">Tras enviar, <strong>TI</strong> revisará y certificará; luego <strong>Gerencia General</strong> resolverá.</p>
+            </div>`;
+
+        container.innerHTML = `
+            <h3 style="margin-bottom:12px;"><i class="${tipo.icono}" style="margin-right:8px;color:${tipo.color};"></i>${tipo.nombre}</h3>
+            <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;">Formulario oficial de reporte y autorización de horas extraordinarias (RC.400.5.1). El flujo es: envío → revisión <strong>Tecnologías de Información</strong> → resolución <strong>Gerencia General</strong>.</p>
+            <form id="reqForm" onsubmit="App.handleCreateRequest(event, 'horas_extraordinarias')">
+                <h4 style="font-size:0.78rem;color:var(--text-light);text-transform:uppercase;margin:16px 0 8px;">1. Identificación del colaborador</h4>
+                <div class="form-row">
+                    <div class="form-group"><label>Número de identificación <span class="required">*</span></label><input type="text" class="form-control" id="heCedula" required placeholder="Cédula o documento"></div>
+                    <div class="form-group"><label>Puesto <span class="required">*</span></label><input type="text" class="form-control" id="hePuesto" required></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Departamento / área</label><input type="text" class="form-control" id="heArea" placeholder="Si difiere del departamento del sistema"></div>
+                    <div class="form-group"><label>Jefatura inmediata <span class="required">*</span></label><input type="text" class="form-control" id="heJefatura" required></div>
+                </div>
+                <h4 style="font-size:0.78rem;color:var(--text-light);text-transform:uppercase;margin:20px 0 8px;">2. Detalle de horas extraordinarias</h4>
+                <div style="overflow-x:auto;">
+                    <table style="width:100%;font-size:0.85rem;border-collapse:collapse;">
+                        <thead><tr style="background:var(--bg-main);">
+                            <th>Fecha</th><th>Inicio</th><th>Fin</th><th>Cantidad</th><th>Justificación</th><th></th>
+                        </tr></thead>
+                        <tbody id="heFilasBody">${rowsHtml}</tbody>
+                    </table>
+                </div>
+                <button type="button" class="btn btn-outline btn-sm" style="margin-top:10px;" onclick="App.addHorasExtraRow()" id="btnHeAddRow"><i class="fas fa-plus"></i> Agregar fila (máx. 8)</button>
+                <div class="form-group" style="margin-top:16px;"><label>Observaciones adicionales</label><textarea class="form-control" id="heObservaciones" rows="2"></textarea></div>
+                <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px;">
+                    <button type="button" class="btn btn-outline" onclick="App.navigate('solicitudes')">Cancelar</button>
+                    <button type="submit" class="btn btn-primary btn-lg" id="btnEnviarReq"><i class="fas fa-paper-plane"></i> Enviar Solicitud</button>
+                </div>
+            </form>
+            ${previewHtml}`;
+
+        this._heRowCounter = 4;
+        const upd = () => App.updateRequestPreview('horas_extraordinarias');
+        ['heCedula', 'hePuesto', 'heArea', 'heJefatura', 'heObservaciones'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.addEventListener('input', upd); el.addEventListener('change', upd); }
+        });
+        document.getElementById('heFilasBody').addEventListener('input', (e) => {
+            if (e.target?.classList?.contains('he-inicio') || e.target?.classList?.contains('he-fin')) {
+                this.recalculateHorasExtraRow(e.target.closest('tr'));
+            }
+            upd();
+        });
+        document.getElementById('heFilasBody').addEventListener('change', (e) => {
+            if (e.target?.classList?.contains('he-inicio') || e.target?.classList?.contains('he-fin')) {
+                this.recalculateHorasExtraRow(e.target.closest('tr'));
+            }
+            upd();
+        });
+        this.recalculateAllHorasExtraRows();
+        upd();
+    }
+
+    static addHorasExtraRow() {
+        const body = document.getElementById('heFilasBody');
+        if (!body || body.querySelectorAll('tr').length >= 8) {
+            Toast.error('Límite', 'Máximo 8 filas');
+            return;
+        }
+        const i = this._heRowCounter++;
+        const tr = document.createElement('tr');
+        tr.dataset.heRow = String(i);
+        tr.innerHTML = `
+            <td style="padding:6px;"><input type="date" class="form-control he-fecha" style="min-width:130px;"></td>
+            <td style="padding:6px;"><input type="time" class="form-control he-inicio"></td>
+            <td style="padding:6px;"><input type="time" class="form-control he-fin"></td>
+            <td style="padding:6px;"><input type="text" class="form-control he-cantidad" placeholder="Auto" readonly></td>
+            <td style="padding:6px;"><input type="text" class="form-control he-justif" placeholder="Justificación"></td>
+            <td style="padding:6px;width:44px;"><button type="button" class="btn btn-outline btn-sm" onclick="App.removeHorasExtraRow(${i})" title="Quitar fila"><i class="fas fa-times"></i></button></td>`;
+        body.appendChild(tr);
+        this.recalculateHorasExtraRow(tr);
+        App.updateRequestPreview('horas_extraordinarias');
+    }
+
+    static removeHorasExtraRow(rowId) {
+        const body = document.getElementById('heFilasBody');
+        if (!body || body.querySelectorAll('tr').length <= 1) {
+            Toast.error('Formulario', 'Debe quedar al menos una fila');
+            return;
+        }
+        const tr = body.querySelector(`tr[data-he-row="${rowId}"]`);
+        if (tr) tr.remove();
+        App.updateRequestPreview('horas_extraordinarias');
+    }
+
+    static recalculateHorasExtraRow(tr) {
+        if (!tr) return;
+        const hi = tr.querySelector('.he-inicio')?.value?.trim() || '';
+        const hf = tr.querySelector('.he-fin')?.value?.trim() || '';
+        const cantidadEl = tr.querySelector('.he-cantidad');
+        if (!cantidadEl) return;
+        if (!hi || !hf) {
+            cantidadEl.value = '';
+            return;
+        }
+        const [hiH, hiM] = hi.split(':').map(Number);
+        const [hfH, hfM] = hf.split(':').map(Number);
+        if ([hiH, hiM, hfH, hfM].some(Number.isNaN)) {
+            cantidadEl.value = '';
+            return;
+        }
+        let totalMin = (hfH * 60 + hfM) - (hiH * 60 + hiM);
+        if (totalMin < 0) totalMin += 24 * 60;
+        const horas = Math.floor(totalMin / 60);
+        const minutos = totalMin % 60;
+        if (minutos === 0) {
+            cantidadEl.value = `${horas} h`;
+        } else {
+            cantidadEl.value = `${horas} h ${minutos} min`;
+        }
+    }
+
+    static recalculateAllHorasExtraRows() {
+        document.querySelectorAll('#heFilasBody tr').forEach(tr => this.recalculateHorasExtraRow(tr));
+    }
+
+    static collectHorasExtraFormDatos(strict) {
+        const cedula = document.getElementById('heCedula')?.value?.trim() || '';
+        const puesto = document.getElementById('hePuesto')?.value?.trim() || '';
+        const area = document.getElementById('heArea')?.value?.trim() || '';
+        const jefatura = document.getElementById('heJefatura')?.value?.trim() || '';
+        const filas = [];
+        document.querySelectorAll('#heFilasBody tr').forEach(tr => {
+            const fecha = tr.querySelector('.he-fecha')?.value?.trim();
+            const hi = tr.querySelector('.he-inicio')?.value?.trim();
+            const hf = tr.querySelector('.he-fin')?.value?.trim();
+            this.recalculateHorasExtraRow(tr);
+            const cant = tr.querySelector('.he-cantidad')?.value?.trim();
+            const just = tr.querySelector('.he-justif')?.value?.trim();
+            if (fecha || hi || hf || cant || just) {
+                filas.push({ fecha, hora_inicio: hi, hora_fin: hf, cantidad: cant, justificacion: just });
+            }
+        });
+        if (strict) {
+            if (!cedula || !puesto || !jefatura) {
+                return { error: 'Complete número de identificación, puesto y jefatura inmediata.' };
+            }
+            if (filas.length === 0) {
+                return { error: 'Agregue al menos una fila con datos en el detalle de horas extraordinarias.' };
+            }
+        }
+        return {
+            datos: {
+                cedula,
+                puesto,
+                area_departamento: area,
+                jefatura_inmediata: jefatura,
+                filas
+            }
+        };
+    }
+
     static async handleCreateRequest(e, type) {
         e.preventDefault();
+        if (type === 'horas_extraordinarias') {
+            const res = this.collectHorasExtraFormDatos(true);
+            if (res.error) {
+                Toast.error('Formulario', res.error);
+                return;
+            }
+            const observaciones = document.getElementById('heObservaciones')?.value || '';
+            this._pendingRequest = { tipo: type, datos: res.datos, observaciones };
+            this.openRequestSignatureModal();
+            return;
+        }
+
         const datos = {};
         const fields = {
+            reqCedula: 'cedula', reqPuesto: 'puesto', reqFechaIngreso: 'fecha_ingreso',
             reqFechaInicio: 'fecha_inicio', reqFechaFin: 'fecha_fin', reqFecha: 'fecha',
             reqHoraIngreso: 'hora_ingreso', reqHoraSalida: 'hora_salida',
             reqHorarioActual: 'horario_actual', reqHorarioSolicitado: 'horario_solicitado',
@@ -1689,8 +1912,27 @@ class App {
         const previewEl = document.getElementById('reqPreviewText');
         if (!previewEl) return;
 
+        if (type === 'horas_extraordinarias') {
+            const user = AuthManager.getUser() || {};
+            const res = this.collectHorasExtraFormDatos(false);
+            const d = res.datos || {};
+            const depNombre = DEPARTAMENTOS[user.departamento]?.nombre || '';
+            if (!d.area_departamento && depNombre) d.area_departamento = depNombre;
+            const fakeReq = {
+                tipo: 'horas_extraordinarias',
+                tipoNombre: TIPOS_SOLICITUD.horas_extraordinarias.nombre,
+                datos: d,
+                solicitanteNombre: user.nombre && user.apellido ? `${user.nombre} ${user.apellido}` : '[Nombre del colaborador]',
+                departamento: user.departamento,
+                fechaSolicitud: new Date().toISOString()
+            };
+            previewEl.textContent = this.buildRequestText(fakeReq);
+            return;
+        }
+
         const user = AuthManager.getUser() || {};
         const fieldMap = {
+            reqCedula: 'cedula', reqPuesto: 'puesto', reqFechaIngreso: 'fecha_ingreso',
             reqFechaInicio: 'fecha_inicio', reqFechaFin: 'fecha_fin', reqFecha: 'fecha',
             reqHoraIngreso: 'hora_ingreso', reqHoraSalida: 'hora_salida',
             reqHorarioActual: 'horario_actual', reqHorarioSolicitado: 'horario_solicitado',
@@ -1724,10 +1966,23 @@ class App {
         if (AuthManager.isAdmin()) {
             requests = await RequestManager.getAll();
         } else {
-            requests = await RequestManager.getByDepartment(user.departamento);
+            const byDep = await RequestManager.getByDepartment(user.departamento);
+            const all = await RequestManager.getAll();
+            const extra = [];
+            if (user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI) {
+                extra.push(...all.filter(r => r.tipo === 'horas_extraordinarias' && r.estado === 'pendiente_ti'));
+            }
+            if (user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia) {
+                extra.push(...all.filter(r => r.tipo === 'horas_extraordinarias' && r.estado === 'pendiente_gerencia'));
+            }
+            const map = new Map();
+            [...byDep, ...extra].forEach(r => map.set(r.id, r));
+            requests = Array.from(map.values());
         }
         requests = requests.sort((a, b) => new Date(b.fechaSolicitud) - new Date(a.fechaSolicitud));
         this._cachedMgrRequests = requests;
+
+        const nPend = requests.filter(r => RequestManager.necesitaMiAprobacion(r, user)).length;
 
         const content = document.getElementById('contentArea');
         content.innerHTML = `
@@ -1737,12 +1992,12 @@ class App {
                 </div>
                 <div class="card-body">
                     <div class="tabs" id="mgrTabs">
-                        <button class="tab active" data-tab="pendiente" onclick="App.filterMgrRequests('pendiente')">Pendientes (${requests.filter(r=>r.estado==='pendiente').length})</button>
+                        <button class="tab active" data-tab="pendiente" onclick="App.filterMgrRequests('pendiente')">Pendientes (${nPend})</button>
                         <button class="tab" data-tab="todas" onclick="App.filterMgrRequests('todas')">Todas (${requests.length})</button>
                         <button class="tab" data-tab="aprobada" onclick="App.filterMgrRequests('aprobada')">Aprobadas (${requests.filter(r=>r.estado==='aprobada').length})</button>
                         <button class="tab" data-tab="rechazada" onclick="App.filterMgrRequests('rechazada')">Rechazadas (${requests.filter(r=>r.estado==='rechazada').length})</button>
                     </div>
-                    <div id="mgrReqContainer">${this.renderManageRequestList(requests.filter(r => r.estado === 'pendiente'))}</div>
+                    <div id="mgrReqContainer">${this.renderManageRequestList(requests.filter(r => RequestManager.necesitaMiAprobacion(r, user)))}</div>
                 </div>
             </div>
         `;
@@ -1757,7 +2012,8 @@ class App {
 
         return requests.map(req => {
             const datos = req.datos || {};
-            const isPending = req.estado === 'pendiente';
+            const userMgr = AuthManager.getUser();
+            const puedoActuar = RequestManager.necesitaMiAprobacion(req, userMgr);
             let datesHtml = '';
             if (datos.fecha_inicio && datos.fecha_fin) {
                 const days = RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin);
@@ -1769,6 +2025,8 @@ class App {
                 datesHtml = `<div class="request-dates"><div class="date-item"><label>Fecha</label><span>${formatDate(datos.fecha)}</span></div>
                     ${datos.hora_ingreso ? `<div class="date-item"><label>Hora</label><span>${datos.hora_ingreso}</span></div>` : ''}
                     ${datos.hora_salida ? `<div class="date-item"><label>Hora</label><span>${datos.hora_salida}</span></div>` : ''}</div>`;
+            } else if (req.tipo === 'horas_extraordinarias' && Array.isArray(datos.filas) && datos.filas.length) {
+                datesHtml = `<div class="request-dates"><div class="date-item"><label>Filas reportadas</label><span>${datos.filas.length}</span></div></div>`;
             }
 
             // Texto completo del permiso sin goce salarial para encargados
@@ -1811,25 +2069,49 @@ ${texto}</pre>
                 </details>`;
             }
 
-            return `<div class="request-card status-${req.estado}">
+            if (req.tipo === 'horas_extraordinarias') {
+                const filas = Array.isArray(datos.filas) ? datos.filas : [];
+                const filasRows = filas.map(f => `<tr><td style="padding:4px 6px;border:1px solid var(--border-light);">${f.fecha ? formatDate(f.fecha) : '—'}</td>
+                    <td style="padding:4px 6px;border:1px solid var(--border-light);">${f.hora_inicio || '—'}</td>
+                    <td style="padding:4px 6px;border:1px solid var(--border-light);">${f.hora_fin || '—'}</td>
+                    <td style="padding:4px 6px;border:1px solid var(--border-light);">${f.cantidad || '—'}</td>
+                    <td style="padding:4px 6px;border:1px solid var(--border-light);">${f.justificacion || '—'}</td></tr>`).join('');
+                detalleHtml += `<div style="margin-top:10px;font-size:0.82rem;">
+                    <strong>Identificación:</strong> ${datos.cedula || '—'} &nbsp;|&nbsp; <strong>Puesto:</strong> ${datos.puesto || '—'}<br>
+                    <strong>Área:</strong> ${datos.area_departamento || DEPARTAMENTOS[req.departamento]?.nombre || '—'} &nbsp;|&nbsp; <strong>Jefatura:</strong> ${datos.jefatura_inmediata || '—'}
+                    </div>
+                    <div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
+                    <thead><tr style="background:var(--bg-main);"><th style="padding:6px;border:1px solid var(--border-light);">Fecha</th><th style="padding:6px;">Inicio</th><th style="padding:6px;">Fin</th><th style="padding:6px;">Cantidad</th><th style="padding:6px;">Justificación</th></tr></thead>
+                    <tbody>${filasRows || '<tr><td colspan="5" style="padding:8px;">Sin filas</td></tr>'}</tbody></table></div>`;
+            }
+
+            const revTi = req.revisionTI;
+            const revTiHtml = revTi?.nombre ? `<p style="font-size:0.78rem;color:var(--text-secondary);margin-top:8px;padding:8px;background:var(--bg-main);border-radius:var(--radius-sm);"><strong>Revisión TI:</strong> ${revTi.nombre} — ${formatDateTime(revTi.fecha)}${revTi.comentario ? `<br><em>${revTi.comentario}</em>` : ''}</p>` : '';
+
+            const cardEst = this.claseCardEstadoSolicitud(req.estado);
+            const pendUi = RequestManager.isEstadoPendienteEmpleado(req.estado);
+            const btnAprobarLabel = req.estado === 'pendiente_ti' ? 'Firmar y certificar (TI)' : 'Firmar y aprobar';
+
+            return `<div class="request-card status-${cardEst}">
                 <div class="request-header">
                     <div>
                         <h4><i class="${TIPOS_SOLICITUD[req.tipo]?.icono || 'fas fa-file'}" style="margin-right:8px;color:${TIPOS_SOLICITUD[req.tipo]?.color || 'var(--primary)'};"></i>${req.tipoNombre}</h4>
                         <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">Solicitado por: <strong>${req.solicitanteNombre}</strong> — ${DEPARTAMENTOS[req.departamento]?.nombre || ''}</p>
                     </div>
-                    <span class="status-badge ${req.estado}"><i class="fas fa-${req.estado === 'pendiente' ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${req.estado.charAt(0).toUpperCase() + req.estado.slice(1)}</span>
+                    <span class="status-badge ${cardEst}"><i class="fas fa-${pendUi ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${this.etiquetaEstadoSolicitud(req.estado)}</span>
                 </div>
                 ${datesHtml}
                 ${req.observaciones ? `<p style="font-size:0.85rem;color:var(--text-secondary);padding:10px;background:var(--bg-main);border-radius:var(--radius-sm);border-left:3px solid var(--primary);margin-bottom:10px;"><strong>Observaciones:</strong> ${req.observaciones}</p>` : ''}
                 ${datos.motivo ? `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px;"><strong>Motivo:</strong> ${datos.motivo}</p>` : ''}
                 ${detalleHtml}
+                ${revTiHtml}
                 ${req.justificacion ? `<p style="font-size:0.85rem;padding:10px;background:rgba(245,127,23,0.08);border-radius:var(--radius-sm);border-left:3px solid var(--warning);margin-bottom:10px;"><strong>Respuesta:</strong> ${req.justificacion}</p>` : ''}
                 ${req.respondidoPorNombre ? `<p style="font-size:0.78rem;color:var(--text-light);">Respondido por: ${req.respondidoPorNombre} — ${formatDateTime(req.fechaRespuesta)}</p>` : ''}
                 <p style="font-size:0.78rem;color:var(--text-light);margin-top:5px;">Solicitado: ${formatDateTime(req.fechaSolicitud)}</p>
-                ${(isPending || req.estado === 'aprobada') ? `
+                ${(puedoActuar || req.estado === 'aprobada') ? `
                 <div style="display:flex;gap:10px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border-light);flex-wrap:wrap;">
-                    ${isPending ? `
-                        <button class="btn btn-success btn-sm" onclick="App.handleSignAndApproveRequest('${req.id}')"><i class="fas fa-pen-nib"></i> Firmar y Aprobar</button>
+                    ${puedoActuar ? `
+                        <button class="btn btn-success btn-sm" onclick="App.handleSignAndApproveRequest('${req.id}')"><i class="fas fa-pen-nib"></i> ${btnAprobarLabel}</button>
                         <button class="btn btn-danger btn-sm" onclick="App.handleRejectRequest('${req.id}')"><i class="fas fa-times"></i> Rechazar</button>
                     ` : ''}
                     ${req.estado === 'aprobada' ? `
@@ -1843,8 +2125,13 @@ ${texto}</pre>
     static filterMgrRequests(status) {
         document.querySelectorAll('#mgrTabs .tab').forEach(t => t.classList.remove('active'));
         document.querySelector(`#mgrTabs .tab[data-tab="${status}"]`)?.classList.add('active');
+        const user = AuthManager.getUser();
         let requests = this._cachedMgrRequests;
-        if (status !== 'todas') requests = requests.filter(r => r.estado === status);
+        if (status === 'pendiente') {
+            requests = requests.filter(r => RequestManager.necesitaMiAprobacion(r, user));
+        } else if (status !== 'todas') {
+            requests = requests.filter(r => r.estado === status);
+        }
         document.getElementById('mgrReqContainer').innerHTML = this.renderManageRequestList(requests);
     }
 
@@ -1919,7 +2206,16 @@ ${texto}</pre>
             ? `<img src="${req.firma.firmaDibujo}" alt="Firma empleado" style="max-width:100%;max-height:80px;display:block;margin:0 auto;" />`
             : `<p style="color:#999;font-size:11px;font-style:italic;text-align:center;margin:0;">Sin firma registrada</p>`;
 
-        this.showModal(`Firmar y Aprobar: ${req.tipoNombre || 'Solicitud'}`, `
+        const esCertTi = req.tipo === 'horas_extraordinarias' && req.estado === 'pendiente_ti';
+        const modalTitulo = esCertTi ? `Revisión TI — ${req.tipoNombre || 'Horas extraordinarias'}` : `Firmar y aprobar: ${req.tipoNombre || 'Solicitud'}`;
+        const labelComentario = esCertTi ? 'Comentario de la revisión TI (opcional)' : 'Comentario de aprobación (opcional)';
+        const textoPasoFirma = esCertTi
+            ? 'Dibuje su firma como responsable de TI para certificar la revisión de los registros institucionales.'
+            : 'Dibuje su firma como administrador para aprobar la solicitud';
+        const textoBotonFirma = esCertTi ? 'Firmar y enviar a Gerencia' : 'Firmar y Aprobar';
+        this._pendingAdminSignButtonHtml = `<i class="fas fa-check"></i> ${textoBotonFirma}`;
+
+        this.showModal(modalTitulo, `
             <div>
                 <div style="margin-bottom:18px;">
                     <h4 style="font-size:0.75rem;color:var(--text-light);text-transform:uppercase;letter-spacing:0.12em;margin-bottom:8px;">Documento de solicitud</h4>
@@ -1938,7 +2234,7 @@ ${texto}</pre>
                 </div>
 
                 <div class="form-group" style="margin-bottom:16px;">
-                    <label style="font-size:0.85rem;">Comentario de aprobación (opcional)</label>
+                    <label style="font-size:0.85rem;">${labelComentario}</label>
                     <textarea class="form-control" id="adminApproveComment" rows="2" placeholder="Comentario..."></textarea>
                 </div>
 
@@ -1956,7 +2252,7 @@ ${texto}</pre>
                 </div>
 
                 <div id="adminSignStep2" style="display:none;">
-                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:12px;text-align:center;">Dibuje su firma como administrador para aprobar la solicitud</p>
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:12px;text-align:center;">${textoPasoFirma}</p>
                     <div style="display:flex;flex-direction:column;align-items:center;gap:12px;">
                         <div style="position:relative;border:2px dashed #1565c0;border-radius:8px;background:white;padding:10px;">
                             <canvas id="signatureCanvas" width="500" height="180" style="display:block;cursor:crosshair;border-radius:4px;"
@@ -1971,7 +2267,7 @@ ${texto}</pre>
                         <div style="display:flex;gap:10px;justify-content:center;">
                             <button class="btn btn-outline" onclick="App.clearSignature()"><i class="fas fa-eraser"></i> Limpiar</button>
                             <button class="btn btn-success" id="btnConfirmAdminSign" onclick="App.confirmAdminSign()">
-                                <i class="fas fa-check"></i> Firmar y Aprobar
+                                <i class="fas fa-check"></i> ${textoBotonFirma}
                             </button>
                         </div>
                     </div>
@@ -1992,6 +2288,20 @@ ${texto}</pre>
         const motivo = datos.motivo || '______________________________';
         const fi = datos.fecha_inicio ? formatDate(datos.fecha_inicio) : '_____';
         const ff = datos.fecha_fin ? formatDate(datos.fecha_fin) : '_____';
+        const toYMD = (dateObj) => {
+            const y = dateObj.getFullYear();
+            const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const d = String(dateObj.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        };
+        const shiftDate = (dateStr, days) => {
+            if (!dateStr) return '_____';
+            const d = new Date(dateStr + 'T12:00:00');
+            d.setDate(d.getDate() + days);
+            return formatDate(toYMD(d));
+        };
+        const ultimoDiaLabora = shiftDate(datos.fecha_inicio, -1);
+        const fechaReincorporacion = shiftDate(datos.fecha_fin, 1);
         const dias = (datos.fecha_inicio && datos.fecha_fin)
             ? `${RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin)} día(s)` : '_____';
 
@@ -2001,7 +2311,10 @@ ${texto}</pre>
 
             case 'vacaciones': {
                 const obs = datos.observaciones ? `\n\nObservaciones:\n${datos.observaciones}` : '';
-                return `SOLICITUD DE DISFRUTE DE VACACIONES\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente el disfrute de mis vacaciones acumuladas.\n\nEl período de vacaciones solicitado comprende desde el día ${fi} hasta el día ${ff}, para un total de ${dias} calendario, de conformidad con el artículo 59 del Código de Trabajo de la República de Costa Rica y las disposiciones aplicables en materia de descanso remunerado. Entiendo que el disfrute de vacaciones es un derecho irrenunciable reconocido por la legislación laboral costarricense.${obs}\n\nManifiesto que he coordinado con mi jefatura inmediata la cobertura de mis funciones durante el período de ausencia, a fin de no afectar la continuidad de los servicios de ${empresa}. Asimismo, me comprometo a dejar debidamente documentadas las labores pendientes y a estar disponible en la medida de lo posible para cualquier consulta urgente que pudiera surgir durante mi ausencia.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+                const ced = datos.cedula || '_____';
+                const puesto = datos.puesto || '_____';
+                const fechaIngreso = datos.fecha_ingreso ? formatDate(datos.fecha_ingreso) : '_____';
+                return `SOLICITUD DE DISFRUTE DE VACACIONES\n\n1. DATOS DEL COLABORADOR\n\nYo, ${nombre}, número de cédula ${ced}, con el puesto de ${puesto}, del departamento / área de ${dep}, con fecha de ingreso a la empresa ${fechaIngreso}.\n\n2. PERIODO DE VACACIONES SOLICITADO\nDe conformidad con lo establecido en el artículo 153 del Código de Trabajo de Costa Rica, solicito el disfrute de mis vacaciones anuales correspondientes al período laborado, en la cantidad de ${dias} hábiles, siendo mi último día que labora el ${ultimoDiaLabora}, con fecha de inicio ${fi}, fecha de finalización ${ff} y fecha de reincorporación laboral ${fechaReincorporacion}.${obs}\n\n3. DECLARACIÓN DEL COLABORADOR\n\nDeclaro que he sido informado(a) de mis derechos y deberes en relación con el disfrute de vacaciones, conforme al Código de Trabajo de Costa Rica, y que el presente período ha sido coordinado con la empresa para no afectar la continuidad del servicio.\n\n4. AUTORIZACIÓN DEL PATRONO / REPRESENTANTE LEGAL\n\nHago constar que el período de vacaciones solicitado ha sido revisado y aprobado, cumpliendo con la normativa laboral vigente, y que durante dicho período el colaborador conservará todos sus derechos laborales.`;
             }
 
             case 'ingreso_posterior': {
@@ -2032,6 +2345,20 @@ ${texto}</pre>
                 const fecha = datos.fecha ? formatDate(datos.fecha) : '_____';
                 const desc = datos.descripcion || '_____';
                 return `NOTIFICACIÓN DE DÍA FESTIVO\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio registro formalmente la siguiente ausencia por día festivo, de conformidad con el calendario oficial de días feriados de la República de Costa Rica y con lo dispuesto en el Código de Trabajo en materia de descansos obligatorios.\n\nFecha: ${fecha}\nDescripción: ${desc}\n\nLa presente notificación tiene como fin dejar constancia formal del día festivo señalado, según lo establecido en el Código de Trabajo y la normativa laboral vigente. Entiendo que en los días feriados de carácter nacional el trabajador tiene derecho al descanso remunerado, salvo las excepciones previstas en la ley. Dejo constancia de que he informado con la debida anticipación a mi jefatura para que se tomen las medidas organizativas que correspondan.\n\nDeclaro que la información aquí consignada es veraz.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+            }
+
+            case 'horas_extraordinarias': {
+                const ced = datos.cedula || '_____';
+                const puesto = datos.puesto || '_____';
+                const area = datos.area_departamento || dep;
+                const jef = datos.jefatura_inmediata || '_____';
+                const filas = Array.isArray(datos.filas) ? datos.filas : [];
+                let tabla = '';
+                filas.forEach((f, idx) => {
+                    const fd = f.fecha ? formatDate(f.fecha) : '_____';
+                    tabla += `${idx + 1}) Fecha: ${fd}  Inicio: ${f.hora_inicio || '_____'}  Fin: ${f.hora_fin || '_____'}  Cantidad: ${f.cantidad || '_____'}\n   Justificación: ${f.justificacion || '_____'}\n`;
+                });
+                return `FORMULARIO OFICIAL DE REPORTE Y AUTORIZACIÓN DE HORAS EXTRAORDINARIAS (RC.400.5.1)\n\n1. IDENTIFICACIÓN DEL COLABORADOR\n\nNombre completo: ${nombre}\nNúmero de identificación: ${ced}\nPuesto: ${puesto}\nDepartamento / Área: ${area}\nJefatura inmediata: ${jef}\n\n2. DETALLE DE LAS HORAS EXTRAORDINARIAS REPORTADAS\n\n${tabla || '(Sin filas registradas)'}\n\nDeclaro que la información consignada es veraz.\n\nEn Costa Rica, a los ${fSolicitud}.`;
             }
 
             default:
@@ -2099,18 +2426,30 @@ ${texto}</pre>
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Procesando...';
 
-        const result = await RequestManager.approve(this._currentSignReqId, comment, firmaAdmin);
+        const reqFresh = await RequestManager.getById(this._currentSignReqId);
+        let result;
+        let okTitulo = 'Aprobada';
+        let okMsg = 'Solicitud firmada y aprobada exitosamente';
+        if (reqFresh?.tipo === 'horas_extraordinarias' && reqFresh.estado === 'pendiente_ti') {
+            result = await RequestManager.approveRevisionTI(this._currentSignReqId, comment, firmaAdmin);
+            okTitulo = 'Revisión TI';
+            okMsg = 'Certificación registrada. La solicitud fue enviada a Gerencia General.';
+        } else {
+            result = await RequestManager.approve(this._currentSignReqId, comment, firmaAdmin);
+        }
+
         if (result) {
-            Toast.success('Aprobada', 'Solicitud firmada y aprobada exitosamente');
+            Toast.success(okTitulo, okMsg);
             this.closeModal();
             this.signatureUnlocked = false;
             this.currentPersonalCode = null;
             this._currentSignReqId = null;
+            this._pendingAdminSignButtonHtml = null;
             this.navigate('gestionar-solicitudes');
         } else {
-            Toast.error('Error', 'No se pudo aprobar la solicitud');
+            Toast.error('Error', 'No se pudo completar la acción');
             btn.disabled = false;
-            btn.innerHTML = '<i class="fas fa-check"></i> Firmar y Aprobar';
+            btn.innerHTML = this._pendingAdminSignButtonHtml || '<i class="fas fa-check"></i> Firmar y Aprobar';
         }
     }
 

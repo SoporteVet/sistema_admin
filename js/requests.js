@@ -4,6 +4,41 @@
 // ============================================================
 
 class RequestManager {
+    static isEstadoPendienteEmpleado(estado) {
+        return estado === 'pendiente' || estado === 'pendiente_ti' || estado === 'pendiente_gerencia';
+    }
+
+    static esHorasExtraordinarias(req) {
+        return req && req.tipo === SOLICITUD_HORAS_EXTRA_CONFIG.tipo;
+    }
+
+    /** Quienes deben ver la tarjeta en "Pendientes" al gestionar solicitudes */
+    static necesitaMiAprobacion(req, user) {
+        if (!req || !user) return false;
+        if (req.estado === 'aprobada' || req.estado === 'rechazada') return false;
+        if (user.rol === 'admin') {
+            return this.isEstadoPendienteEmpleado(req.estado);
+        }
+        if (user.rol !== 'encargado') return false;
+        if (this.esHorasExtraordinarias(req)) {
+            if (req.estado === 'pendiente_ti') return user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI;
+            if (req.estado === 'pendiente_gerencia') return user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia;
+            return false;
+        }
+        return req.estado === 'pendiente' && req.departamento === user.departamento;
+    }
+
+    /** Solicitudes que el usuario (encargado/admin) debe atender en el tab Pendientes */
+    static async getPendingActionsForUser(user) {
+        if (!user) return [];
+        const all = await this.getAll();
+        if (user.rol === 'admin') {
+            return all.filter(r => this.isEstadoPendienteEmpleado(r.estado));
+        }
+        if (user.rol !== 'encargado') return [];
+        return all.filter(r => this.necesitaMiAprobacion(r, user));
+    }
+
     // Obtener todas las solicitudes
     static async getAll() {
         try {
@@ -79,13 +114,14 @@ class RequestManager {
             const user = AuthManager.getUser();
 
             const newReqRef = dbRef.requests.push();
+            const esFlujoHe = requestData.tipo === SOLICITUD_HORAS_EXTRA_CONFIG.tipo;
             const newRequest = {
                 tipo: requestData.tipo,
                 tipoNombre: TIPOS_SOLICITUD[requestData.tipo]?.nombre || requestData.tipo,
                 solicitante: user.id,
                 solicitanteNombre: user.nombre + ' ' + user.apellido,
                 departamento: user.departamento,
-                estado: 'pendiente',
+                estado: esFlujoHe ? 'pendiente_ti' : 'pendiente',
                 fechaSolicitud: new Date().toISOString(),
                 datos: requestData.datos || {},
                 observaciones: requestData.observaciones || '',
@@ -99,8 +135,12 @@ class RequestManager {
 
             await newReqRef.set(newRequest);
 
-            // Notificar a encargados del departamento y admins
-            const encargados = await AuthManager.getEncargadosDepartamento(user.departamento);
+            let encargados = await AuthManager.getEncargadosDepartamento(user.departamento);
+            if (esFlujoHe) {
+                const encTi = await AuthManager.getEncargadosDepartamento(SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI);
+                encargados = encTi;
+            }
+
             const allUsers = await AuthManager.getAllUsers();
             const admins = allUsers.filter(u => u.rol === 'admin' && u.activo);
 
@@ -108,11 +148,15 @@ class RequestManager {
                 arr.findIndex(x => x.id === u.id) === i && u.id !== user.id
             );
 
+            const mensajeNueva = esFlujoHe
+                ? `${user.nombre} ${user.apellido} envió formulario de horas extraordinarias (pendiente revisión TI).`
+                : `${user.nombre} ${user.apellido} ha solicitado: ${newRequest.tipoNombre}`;
+
             const notifPromises = notificar.map(enc =>
                 NotificationManager.create({
                     tipo: 'solicitud_nueva',
-                    titulo: 'Nueva solicitud',
-                    mensaje: `${user.nombre} ${user.apellido} ha solicitado: ${newRequest.tipoNombre}`,
+                    titulo: esFlujoHe ? 'Horas extraordinarias — revisión TI' : 'Nueva solicitud',
+                    mensaje: mensajeNueva,
                     destinatario: enc.id,
                     referencia: newReqRef.key,
                     referenciaType: 'request'
@@ -127,12 +171,74 @@ class RequestManager {
         }
     }
 
-    // Aprobar solicitud
+    // Revisión TI (horas extraordinarias): pasa a pendiente de Gerencia General
+    static async approveRevisionTI(reqId, comentario = '', firmaTI = null) {
+        try {
+            const user = AuthManager.getUser();
+            const req = await this.getById(reqId);
+            if (!req || req.tipo !== SOLICITUD_HORAS_EXTRA_CONFIG.tipo || req.estado !== 'pendiente_ti') return null;
+
+            const revisionTI = {
+                userId: user.id,
+                nombre: user.nombre + ' ' + user.apellido,
+                fecha: new Date().toISOString(),
+                comentario: comentario || '',
+                firmaDibujo: firmaTI?.firmaDibujo || null
+            };
+
+            const updates = {
+                estado: 'pendiente_gerencia',
+                revisionTI
+            };
+
+            await dbRef.requests.child(reqId).update(updates);
+
+            const encGe = await AuthManager.getEncargadosDepartamento(SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia);
+            const allUsers = await AuthManager.getAllUsers();
+            const admins = allUsers.filter(u => u.rol === 'admin' && u.activo);
+            const notificar = [...encGe, ...admins].filter((u, i, arr) =>
+                arr.findIndex(x => x.id === u.id) === i && u.id !== user.id
+            );
+
+            await Promise.all(notificar.map(enc =>
+                NotificationManager.create({
+                    tipo: 'solicitud_nueva',
+                    titulo: 'Horas extraordinarias — resolución Gerencia',
+                    mensaje: `TI certificó la solicitud de ${req.solicitanteNombre}. Pendiente de Gerencia General.`,
+                    destinatario: enc.id,
+                    referencia: reqId,
+                    referenciaType: 'request'
+                })
+            ));
+
+            await NotificationManager.create({
+                tipo: 'solicitud_nueva',
+                titulo: 'Solicitud en Gerencia',
+                mensaje: `Su solicitud de horas extraordinarias fue revisada por TI y está pendiente de resolución de Gerencia General.`,
+                destinatario: req.solicitante,
+                referencia: reqId,
+                referenciaType: 'request'
+            });
+
+            return { ...req, ...updates };
+        } catch (error) {
+            console.error('Error en aprobación TI:', error);
+            return null;
+        }
+    }
+
+    // Aprobación final Gerencia (u otras solicitudes en un solo paso)
     static async approve(reqId, justificacion = '', firmaAdmin = null) {
         try {
             const user = AuthManager.getUser();
             const req = await this.getById(reqId);
             if (!req) return null;
+
+            if (req.tipo === SOLICITUD_HORAS_EXTRA_CONFIG.tipo) {
+                if (req.estado !== 'pendiente_gerencia') return null;
+            } else if (req.estado !== 'pendiente') {
+                return null;
+            }
 
             const updates = {
                 estado: 'aprobada',
@@ -142,11 +248,19 @@ class RequestManager {
                 justificacion: justificacion
             };
 
+            if (req.tipo === SOLICITUD_HORAS_EXTRA_CONFIG.tipo) {
+                updates.resolucionGerencia = {
+                    decision: 'aprobada',
+                    userId: user.id,
+                    nombre: user.nombre + ' ' + user.apellido,
+                    fecha: new Date().toISOString()
+                };
+            }
+
             if (firmaAdmin) updates.firmaAdmin = firmaAdmin;
 
             await dbRef.requests.child(reqId).update(updates);
 
-            // Notificar al solicitante
             await NotificationManager.create({
                 tipo: 'solicitud_aprobada',
                 titulo: 'Solicitud aprobada',
@@ -178,6 +292,16 @@ class RequestManager {
                 justificacion: justificacion
             };
 
+            if (this.esHorasExtraordinarias(req)) {
+                updates.resolucionGerencia = {
+                    decision: 'rechazada',
+                    userId: user.id,
+                    nombre: user.nombre + ' ' + user.apellido,
+                    fecha: new Date().toISOString(),
+                    etapa: req.estado === 'pendiente_ti' ? 'ti' : 'gerencia'
+                };
+            }
+
             await dbRef.requests.child(reqId).update(updates);
 
             // Notificar al solicitante
@@ -202,7 +326,7 @@ class RequestManager {
         const all = await this.getAll();
         return {
             total: all.length,
-            pendientes: all.filter(r => r.estado === 'pendiente').length,
+            pendientes: all.filter(r => this.isEstadoPendienteEmpleado(r.estado)).length,
             aprobadas: all.filter(r => r.estado === 'aprobada').length,
             rechazadas: all.filter(r => r.estado === 'rechazada').length
         };

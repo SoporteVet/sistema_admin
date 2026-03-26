@@ -213,6 +213,9 @@ class AuthManager {
                 activo: true,
                 fechaCreacion: new Date().toISOString()
             };
+            if (userData.cedula) profile.cedula = String(userData.cedula).trim();
+            if (userData.puesto) profile.puesto = String(userData.puesto).trim();
+            if (userData.fechaIngreso) profile.fechaIngreso = String(userData.fechaIngreso).trim();
 
             await dbRef.users.child(newUid).set(profile);
 
@@ -234,6 +237,9 @@ class AuthManager {
             if (updates.rol !== undefined) cleanUpdates.rol = updates.rol;
             if (updates.departamento !== undefined) cleanUpdates.departamento = updates.departamento;
             if (updates.activo !== undefined) cleanUpdates.activo = updates.activo;
+            if (updates.cedula !== undefined) cleanUpdates.cedula = updates.cedula;
+            if (updates.puesto !== undefined) cleanUpdates.puesto = updates.puesto;
+            if (updates.fechaIngreso !== undefined) cleanUpdates.fechaIngreso = updates.fechaIngreso;
 
             await dbRef.users.child(uid).update(cleanUpdates);
 

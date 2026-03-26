@@ -411,26 +411,38 @@ class PDFGenerator {
             });
 
             // ── Componer slice del body con marca de agua centrada por página ────
-            const makePageCanvas = (offsetY, heightPx, overlayWatermark = false) => {
+            // fullCanvasHeightPx = altura fija del área de cuerpo en esa página (cartas/márgenes).
+            // Así, si el slice de contenido es más corto, el lienzo sigue llenando la página y la marca no se corta.
+            const makePageCanvas = (offsetY, contentSlicePx, overlayWatermark, fullCanvasHeightPx) => {
                 const c   = document.createElement('canvas');
                 c.width   = bodyCanvas.width;
-                c.height  = heightPx;
+                c.height  = fullCanvasHeightPx;
                 const ctx = c.getContext('2d');
 
                 // Fondo blanco
                 ctx.fillStyle = '#ffffff';
                 ctx.fillRect(0, 0, c.width, c.height);
 
-                // Contenido del body
-                ctx.drawImage(bodyCanvas, 0, offsetY, bodyCanvas.width, heightPx, 0, 0, c.width, heightPx);
+                const maxSourceH = Math.max(0, bodyCanvas.height - offsetY);
+                const drawH = Math.min(contentSlicePx, maxSourceH, fullCanvasHeightPx);
+                if (drawH > 0) {
+                    ctx.drawImage(
+                        bodyCanvas,
+                        0, offsetY, bodyCanvas.width, drawH,
+                        0, 0, c.width, drawH
+                    );
+                }
 
-                // Marca de agua centrada para páginas 2+ (encima del fondo blanco del body)
+                // Marca de agua sobre toda la altura del lienzo (página completa visual)
                 if (overlayWatermark && wmImg) {
+                    // Mantener tamaño uniforme de marca en todas las páginas (igual que la primera).
                     const wmScale = (c.width * 0.75) / wmImg.naturalWidth;
-                    const wmW = wmImg.naturalWidth  * wmScale;
+                    const wmW = wmImg.naturalWidth * wmScale;
                     const wmH = wmImg.naturalHeight * wmScale;
+                    const wmYOffset = c.height * 0.08; // bajar ligeramente la marca
+                    const wmY = Math.max(0, Math.min(((c.height - wmH) / 2) + wmYOffset, c.height - wmH));
                     ctx.globalAlpha = 0.10;
-                    ctx.drawImage(wmImg, (c.width - wmW) / 2, (c.height - wmH) / 2, wmW, wmH);
+                    ctx.drawImage(wmImg, (c.width - wmW) / 2, wmY, wmW, wmH);
                     ctx.globalAlpha = 1;
                 }
 
@@ -443,7 +455,7 @@ class PDFGenerator {
             const headerHeightMm = headerCanvas.height * mmPerPx;
 
             // ── 3. Renderizar cuerpo completo SIN marca de agua ──────────────────
-            let bodyHTML = this.createDocumentHTML(doc, true);
+            let bodyHTML = this.createDocumentHTML(doc, true, null, false, false);
             bodyHTML = bodyHTML
                 .replace('padding: 20px;', 'padding: 0;')
                 .replace('min-height: 100vh;', 'min-height: auto;');
@@ -493,9 +505,11 @@ class PDFGenerator {
             const page1BodyPx = Math.floor(contentHeightPrintSafe / bodyMmPerPx);
             const page2BodyPx = Math.floor((contentHeightPrintSafe - headerHeightMm) / bodyMmPerPx);
             const remainingAfterPage1 = Math.max(0, bodyCanvas.height - page1BodyPx);
-            const totalPages = remainingAfterPage1 > 0
+            const bodyPages = remainingAfterPage1 > 0
                 ? 1 + Math.ceil(remainingAfterPage1 / Math.max(1, page2BodyPx))
                 : 1;
+            // Siempre reservar una última página para firmas del documento.
+            const totalPages = bodyPages + 1;
 
             // ── 5. Paginar ───────────────────────────────────────────────────────
             let renderedPx = 0;
@@ -509,9 +523,9 @@ class PDFGenerator {
                     // Página 1: header incluido en el bodyCanvas
                     const targetSlicePx = Math.min(page1BodyPx, bodyCanvas.height - renderedPx);
                     const slicePx = getSmartSliceHeight(renderedPx, targetSlicePx);
-                    const page    = makePageCanvas(renderedPx, slicePx, false);
+                    const page    = makePageCanvas(renderedPx, slicePx, true, page1BodyPx);
                     pdf.addImage(page.toDataURL('image/jpeg', 0.80), 'JPEG',
-                        marginSide, marginTop, contentWidth, slicePx * bodyMmPerPx);
+                        marginSide, marginTop, contentWidth, page.height * bodyMmPerPx);
                     renderedPx += slicePx;
                     if (renderedPx < bodyCanvas.height) {
                         renderedPx = Math.min(bodyCanvas.height, renderedPx + pageJoinTrimPx);
@@ -527,9 +541,9 @@ class PDFGenerator {
 
                     const targetSlicePx = Math.min(page2BodyPx, bodyCanvas.height - renderedPx);
                     const slicePx = getSmartSliceHeight(renderedPx, targetSlicePx);
-                    const page    = makePageCanvas(renderedPx, slicePx, true);
+                    const page    = makePageCanvas(renderedPx, slicePx, true, page2BodyPx);
                     pdf.addImage(page.toDataURL('image/jpeg', 0.80), 'JPEG',
-                        marginSide, marginTop + headerHeightMm, contentWidth, slicePx * bodyMmPerPx);
+                        marginSide, marginTop + headerHeightMm, contentWidth, page.height * bodyMmPerPx);
                     renderedPx += slicePx;
                     if (renderedPx < bodyCanvas.height) {
                         renderedPx = Math.min(bodyCanvas.height, renderedPx + pageJoinTrimPx);
@@ -537,6 +551,51 @@ class PDFGenerator {
                 }
                 pageIndex++;
             }
+
+            // ── 6. Página final exclusiva para firmas ───────────────────────────
+            pdf.addPage();
+            const signaturesHeader = await renderDiv(
+                this.createDocHeaderHTML(doc, `${totalPages} de ${totalPages}`)
+            );
+            pdf.addImage(signaturesHeader.toDataURL('image/jpeg', 0.80), 'JPEG',
+                marginSide, marginTop, contentWidth, headerHeightMm);
+
+            const signaturesCanvas = await renderDiv(this.createDocumentSignaturesHTML(doc));
+            // Misma altura útil que el cuerpo bajo el header en pág. 2+, para marca de agua completa.
+            const signaturesBodyHeightPx = page2BodyPx;
+            const signaturesWithWatermark = document.createElement('canvas');
+            signaturesWithWatermark.width = signaturesCanvas.width;
+            signaturesWithWatermark.height = signaturesBodyHeightPx;
+            const signaturesCtx = signaturesWithWatermark.getContext('2d');
+            signaturesCtx.fillStyle = '#ffffff';
+            signaturesCtx.fillRect(0, 0, signaturesWithWatermark.width, signaturesWithWatermark.height);
+            signaturesCtx.drawImage(signaturesCanvas, 0, 0);
+
+            // Aplicar marca de agua también en la página de firmas.
+            if (wmImg) {
+                const wmScale = (signaturesWithWatermark.width * 0.75) / wmImg.naturalWidth;
+                const wmW = wmImg.naturalWidth * wmScale;
+                const wmH = wmImg.naturalHeight * wmScale;
+                const wmYOffset = signaturesWithWatermark.height * 0.08; // bajar ligeramente la marca
+                const wmY = Math.max(
+                    0,
+                    Math.min(((signaturesWithWatermark.height - wmH) / 2) + wmYOffset, signaturesWithWatermark.height - wmH)
+                );
+                signaturesCtx.globalAlpha = 0.10;
+                signaturesCtx.drawImage(
+                    wmImg,
+                    (signaturesWithWatermark.width - wmW) / 2,
+                    wmY,
+                    wmW,
+                    wmH
+                );
+                signaturesCtx.globalAlpha = 1;
+            }
+
+            const signaturesMmPerPx = contentWidth / signaturesWithWatermark.width;
+            const signaturesHeightMm = signaturesWithWatermark.height * signaturesMmPerPx;
+            pdf.addImage(signaturesWithWatermark.toDataURL('image/jpeg', 0.85), 'JPEG',
+                marginSide, marginTop + headerHeightMm, contentWidth, signaturesHeightMm);
 
             const fileName = `Documento_${doc.codigo}_${new Date().toISOString().split('T')[0]}.pdf`;
             pdf.save(fileName);
@@ -598,16 +657,18 @@ class PDFGenerator {
 
     // Crear HTML del documento para renderizar
     // Nota: includeSignature y signatureData ya no se usan, siempre se muestran todas las firmas disponibles
-    static createDocumentHTML(doc, includeSignature = false, signatureData = null) {
+    static createDocumentHTML(doc, includeSignature = false, signatureData = null, includeSignaturesSection = true, includeWatermarkLayer = true) {
         const dep = DEPARTAMENTOS[doc.departamento];
         const fechaTrdFija = '30-10-2025';
 
         let html = `
             <div style="font-family: Arial, sans-serif !important; color: #000; background: white; padding: 20px; margin: 0; position: relative; min-height: 100vh;">
+                ${includeWatermarkLayer ? `
                 <!-- MARCA DE AGUA HORIZONTAL -->
                 <div style="position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); opacity: 0.18; z-index: 0; pointer-events: none; width: 100%; text-align: center;">
                     <img src="img/empresa_marca_agua.jpg" alt="Marca de agua" style="width: 80%; height: auto; object-fit: contain; opacity: 0.25;" />
                 </div>
+                ` : ''}
 
                 <!-- CONTENIDO PRINCIPAL -->
                 <div style="position: relative; z-index: 1;">
@@ -681,7 +742,20 @@ class PDFGenerator {
         `;
 
         // Las firmas se muestran en los cuadros del footer, no aquí
+        if (includeSignaturesSection) {
+            html += this.createDocumentSignaturesHTML(doc);
+        }
 
+        html += `
+                </div>
+            </div>
+        `;
+
+        return html;
+    }
+
+    // Crear HTML de la sección de firmas del documento
+    static createDocumentSignaturesHTML(doc) {
         // Obtener todas las firmas del documento
         const firmasArray = doc.firmas ? Object.values(doc.firmas) : [];
         console.log('Firmas encontradas en el documento:', firmasArray.length, firmasArray);
@@ -745,7 +819,7 @@ class PDFGenerator {
             }
         }
         
-        html += `
+        return `
                 <!-- FOOTER - Dos cuadros de firma -->
                 <div style="margin-top: 50px; padding-top: 20px; border-top: 1px solid #eee; font-family: Arial, sans-serif;">
                     <div style="display: flex; justify-content: space-between; gap: 30px; flex-wrap: wrap;">
@@ -794,11 +868,7 @@ class PDFGenerator {
                         </div>
                     </div>
                 </div>
-                </div>
-            </div>
         `;
-
-        return html;
     }
 
     // Obtener texto de destinatarios
@@ -818,7 +888,7 @@ class PDFGenerator {
         return tmp.textContent || tmp.innerText || '';
     }
 
-    // Generar PDF de solicitud de permiso sin goce de salario
+    // Generar PDF de solicitud (incluye flujo especial para horas extraordinarias)
     static async generateRequestPDF(req) {
         try {
             const tempDiv = document.createElement('div');
@@ -838,25 +908,45 @@ class PDFGenerator {
             const { jsPDF } = window.jspdf;
             const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-            const canvas = await html2canvas(tempDiv, {
-                scale: 1.5,
-                useCORS: true,
-                allowTaint: true,
-                backgroundColor: '#ffffff',
-                logging: false,
-                windowWidth: 800
-            });
+            const renderCurrentDivToPage = async () => {
+                const canvas = await html2canvas(tempDiv, {
+                    scale: 1.5,
+                    useCORS: true,
+                    allowTaint: true,
+                    backgroundColor: '#ffffff',
+                    logging: false,
+                    windowWidth: 800
+                });
 
-            const imgData = canvas.toDataURL('image/jpeg', 0.85);
-            const imgWidth = 210;
-            const imgHeight = (canvas.height * imgWidth) / canvas.width;
-            pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+                const imgData = canvas.toDataURL('image/jpeg', 0.85);
+                const imgWidth = 210;
+                const imgHeight = (canvas.height * imgWidth) / canvas.width;
+                pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+            };
+
+            if (req.tipo === 'horas_extraordinarias') {
+                // Página 1: contenido principal, sin firmas.
+                tempDiv.innerHTML = this.createRequestHTML(req, false, '1 de 2');
+                await this.waitForImages(tempDiv);
+                await renderCurrentDivToPage();
+
+                // Página 2: solo firmas.
+                pdf.addPage();
+                tempDiv.innerHTML = this.createRequestSignaturesPageHTML(req, '2 de 2');
+                await this.waitForImages(tempDiv);
+                await renderCurrentDivToPage();
+            } else {
+                tempDiv.innerHTML = this.createRequestHTML(req, true, '1 de 1');
+                await this.waitForImages(tempDiv);
+                await renderCurrentDivToPage();
+            }
 
             document.body.removeChild(tempDiv);
 
             const safeName = (req.solicitanteNombre || req.id || 'solicitud').replace(/\s+/g, '_');
             const fecha = new Date().toISOString().split('T')[0];
-            const fileName = `Permiso_Sin_Goce_${safeName}_${fecha}.pdf`;
+            const prefijo = req.tipo === 'horas_extraordinarias' ? 'Horas_Extraordinarias' : 'Permiso_Sin_Goce';
+            const fileName = `${prefijo}_${safeName}_${fecha}.pdf`;
             pdf.save(fileName);
 
             return { success: true, fileName };
@@ -867,7 +957,7 @@ class PDFGenerator {
     }
 
     // Crear HTML profesional para cualquier tipo de solicitud
-    static createRequestHTML(req) {
+    static createRequestHTML(req, includeSignaturesSection = true, pageLabel = '1 de 1') {
         const datos = req.datos || {};
         const empresa = APP_CONFIG?.appName || 'La empresa';
         const nombreCompleto = req.solicitanteNombre || 'Empleado';
@@ -878,11 +968,58 @@ class PDFGenerator {
 
         const firmaEmpleado = req.firma || null;
         const firmaAdmin = req.firmaAdmin || null;
+        const revisionTI = req.revisionTI || null;
 
         const estadoBadgeColor = req.estado === 'aprobada' ? '#2e7d32' : req.estado === 'rechazada' ? '#c62828' : '#e65100';
-        const estadoTexto = req.estado === 'aprobada' ? 'APROBADA' : req.estado === 'rechazada' ? 'RECHAZADA' : 'PENDIENTE';
+        let estadoTexto = req.estado === 'aprobada' ? 'APROBADA' : req.estado === 'rechazada' ? 'RECHAZADA' : 'PENDIENTE';
+        if (req.estado === 'pendiente_ti') estadoTexto = 'PEND. REVISIÓN TI';
+        if (req.estado === 'pendiente_gerencia') estadoTexto = 'PEND. GERENCIA';
 
         const { titulo, bodyHTML } = this.getRequestBodyHTML(req);
+
+        const firmaCol = (tituloCol, imgSrc, nombre, sub, fechaIso) => `
+                        <div style="flex: 1; min-width: 0; text-align: center; border: 1px solid #c5cae9; border-radius: 8px; padding: 12px; background: #fafafa;">
+                            <p style="font-size: 10px; font-weight: bold; margin: 0 0 8px; color: #1a237e; text-transform: uppercase; letter-spacing: 0.6px;">${tituloCol}</p>
+                            <div style="border: 2px dashed #1565c0; border-radius: 6px; padding: 8px; background: white; min-height: 72px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
+                                ${imgSrc
+            ? `<img src="${imgSrc}" alt="Firma" style="max-width: 100%; max-height: 64px;" />`
+            : `<p style="color: #bbb; font-size: 10px; font-style: italic; margin: 0;">Sin firma</p>`}
+                            </div>
+                            <p style="font-size: 11px; font-weight: bold; margin: 2px 0; color: #000;">${nombre}</p>
+                            <p style="font-size: 10px; color: #555; margin: 2px 0;">${sub}</p>
+                            ${fechaIso ? `<p style="font-size: 9px; color: #888; margin: 2px 0;">${new Date(fechaIso).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                        </div>`;
+
+        const firmasHtml = req.tipo === 'horas_extraordinarias'
+            ? `<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                        ${firmaCol('Firma del solicitante', firmaEmpleado?.firmaDibujo, firmaEmpleado?.nombre || nombreCompleto, depNombre, firmaEmpleado?.fecha)}
+                        ${firmaCol('Revisión TI', revisionTI?.firmaDibujo, revisionTI?.nombre || '—', 'Tecnologías de Información', revisionTI?.fecha)}
+                        ${firmaCol('Resolución Gerencia', firmaAdmin?.firmaDibujo, firmaAdmin?.nombre || (req.respondidoPorNombre || '—'), firmaAdmin?.rol ? (ROLES[firmaAdmin.rol]?.nombre || firmaAdmin.rol) : 'Gerencia General', firmaAdmin?.fecha)}
+                    </div>`
+            : `<div style="display: flex; justify-content: space-between; gap: 24px;">
+                        <div style="flex: 1; text-align: center; border: 1px solid #c5cae9; border-radius: 8px; padding: 16px; background: #fafafa;">
+                            <p style="font-size: 11px; font-weight: bold; margin: 0 0 10px; color: #1a237e; text-transform: uppercase; letter-spacing: 0.8px;">Firma del Solicitante</p>
+                            <div style="border: 2px dashed #1565c0; border-radius: 6px; padding: 10px; background: white; min-height: 90px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
+                                ${firmaEmpleado?.firmaDibujo
+            ? `<img src="${firmaEmpleado.firmaDibujo}" alt="Firma empleado" style="max-width: 100%; max-height: 80px;" />`
+            : `<p style="color: #bbb; font-size: 11px; font-style: italic; margin: 0;">Sin firma registrada</p>`}
+                            </div>
+                            <p style="font-size: 12px; font-weight: bold; margin: 4px 0; color: #000;">${firmaEmpleado?.nombre || nombreCompleto}</p>
+                            <p style="font-size: 11px; color: #555; margin: 2px 0;">${depNombre}</p>
+                            ${firmaEmpleado?.fecha ? `<p style="font-size: 10px; color: #888; margin: 2px 0;">${new Date(firmaEmpleado.fecha).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                        </div>
+                        <div style="flex: 1; text-align: center; border: 1px solid #c5cae9; border-radius: 8px; padding: 16px; background: #fafafa;">
+                            <p style="font-size: 11px; font-weight: bold; margin: 0 0 10px; color: #1a237e; text-transform: uppercase; letter-spacing: 0.8px;">Firma del Administrador</p>
+                            <div style="border: 2px dashed #1565c0; border-radius: 6px; padding: 10px; background: white; min-height: 90px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
+                                ${firmaAdmin?.firmaDibujo
+            ? `<img src="${firmaAdmin.firmaDibujo}" alt="Firma admin" style="max-width: 100%; max-height: 80px;" />`
+            : `<p style="color: #bbb; font-size: 11px; font-style: italic; margin: 0;">Sin firma registrada</p>`}
+                            </div>
+                            <p style="font-size: 12px; font-weight: bold; margin: 4px 0; color: #000;">${firmaAdmin?.nombre || (req.respondidoPorNombre || 'Administrador')}</p>
+                            <p style="font-size: 11px; color: #555; margin: 2px 0;">${firmaAdmin?.rol ? (ROLES[firmaAdmin.rol]?.nombre || firmaAdmin.rol) : 'Administrador'}</p>
+                            ${firmaAdmin?.fecha ? `<p style="font-size: 10px; color: #888; margin: 2px 0;">${new Date(firmaAdmin.fecha).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                        </div>
+                    </div>`;
 
         return `
         <div style="font-family: Arial, sans-serif; color: #000; background: white; padding: 20px; position: relative; min-height: 100vh;">
@@ -904,9 +1041,11 @@ class PDFGenerator {
                             </div>
                         </div>
                         <div style="text-align: right; font-size: 12px; color: #333; line-height: 1.8; padding-top: 10px;">
+                            ${req.tipo === 'horas_extraordinarias' ? '<div><strong>COD:</strong> RC.400.5.1</div>' : ''}
                             <div><strong>Fecha:</strong> ${fechaSolicitudShort}</div>
                             <div><strong>Solicitante:</strong> ${nombreCompleto}</div>
                             <div><strong>Departamento:</strong> ${depNombre}</div>
+                            <div><strong>Página:</strong> ${pageLabel}</div>
                             <div style="margin-top: 4px;">
                                 <span style="background: ${estadoBadgeColor}; color: white; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: bold;">${estadoTexto}</span>
                             </div>
@@ -929,32 +1068,74 @@ class PDFGenerator {
                     </div>` : ''}
                 </div>
 
+                ${includeSignaturesSection ? `
                 <!-- CUADROS DE FIRMA -->
                 <div style="margin-top: 30px; padding-top: 20px; border-top: 2px solid #1a237e;">
-                    <div style="display: flex; justify-content: space-between; gap: 24px;">
-                        <div style="flex: 1; text-align: center; border: 1px solid #c5cae9; border-radius: 8px; padding: 16px; background: #fafafa;">
-                            <p style="font-size: 11px; font-weight: bold; margin: 0 0 10px; color: #1a237e; text-transform: uppercase; letter-spacing: 0.8px;">Firma del Solicitante</p>
-                            <div style="border: 2px dashed #1565c0; border-radius: 6px; padding: 10px; background: white; min-height: 90px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
-                                ${firmaEmpleado?.firmaDibujo
-                                    ? `<img src="${firmaEmpleado.firmaDibujo}" alt="Firma empleado" style="max-width: 100%; max-height: 80px;" />`
-                                    : `<p style="color: #bbb; font-size: 11px; font-style: italic; margin: 0;">Sin firma registrada</p>`}
+                    ${firmasHtml}
+                </div>` : ''}
+            </div>
+        </div>`;
+    }
+
+    static createRequestSignaturesPageHTML(req, pageLabel = '2 de 2') {
+        const nombreCompleto = req.solicitanteNombre || 'Empleado';
+        const depNombre = DEPARTAMENTOS[req.departamento]?.nombre || 'su departamento';
+        const fechaSolicitud = new Date(req.fechaSolicitud);
+        const fechaSolicitudShort = fechaSolicitud.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const firmaEmpleado = req.firma || null;
+        const firmaAdmin = req.firmaAdmin || null;
+        const revisionTI = req.revisionTI || null;
+
+        const firmaCol = (tituloCol, imgSrc, nombre, sub, fechaIso) => `
+                        <div style="flex: 1; min-width: 0; text-align: center; border: 1px solid #c5cae9; border-radius: 8px; padding: 12px; background: #fafafa;">
+                            <p style="font-size: 10px; font-weight: bold; margin: 0 0 8px; color: #1a237e; text-transform: uppercase; letter-spacing: 0.6px;">${tituloCol}</p>
+                            <div style="border: 2px dashed #1565c0; border-radius: 6px; padding: 8px; background: white; min-height: 72px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px;">
+                                ${imgSrc
+            ? `<img src="${imgSrc}" alt="Firma" style="max-width: 100%; max-height: 64px;" />`
+            : `<p style="color: #bbb; font-size: 10px; font-style: italic; margin: 0;">Sin firma</p>`}
                             </div>
-                            <p style="font-size: 12px; font-weight: bold; margin: 4px 0; color: #000;">${firmaEmpleado?.nombre || nombreCompleto}</p>
-                            <p style="font-size: 11px; color: #555; margin: 2px 0;">${depNombre}</p>
-                            ${firmaEmpleado?.fecha ? `<p style="font-size: 10px; color: #888; margin: 2px 0;">${new Date(firmaEmpleado.fecha).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                            <p style="font-size: 11px; font-weight: bold; margin: 2px 0; color: #000;">${nombre}</p>
+                            <p style="font-size: 10px; color: #555; margin: 2px 0;">${sub}</p>
+                            ${fechaIso ? `<p style="font-size: 9px; color: #888; margin: 2px 0;">${new Date(fechaIso).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                        </div>`;
+
+        const firmasHtml = `<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                        ${firmaCol('Firma del solicitante', firmaEmpleado?.firmaDibujo, firmaEmpleado?.nombre || nombreCompleto, depNombre, firmaEmpleado?.fecha)}
+                        ${firmaCol('Revisión TI', revisionTI?.firmaDibujo, revisionTI?.nombre || '—', 'Tecnologías de Información', revisionTI?.fecha)}
+                        ${firmaCol('Resolución Gerencia', firmaAdmin?.firmaDibujo, firmaAdmin?.nombre || (req.respondidoPorNombre || '—'), firmaAdmin?.rol ? (ROLES[firmaAdmin.rol]?.nombre || firmaAdmin.rol) : 'Gerencia General', firmaAdmin?.fecha)}
+                    </div>`;
+
+        return `
+        <div style="font-family: Arial, sans-serif; color: #000; background: white; padding: 20px; position: relative; min-height: 100vh;">
+            <div style="position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); opacity: 0.08; z-index: 0; pointer-events: none; width: 100%; text-align: center;">
+                <img src="img/empresa_marca_agua.jpg" alt="Marca de agua" style="width: 80%; height: auto; object-fit: contain;" />
+            </div>
+            <div style="position: relative; z-index: 1;">
+                <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 3px solid #1a237e;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div style="display: flex; align-items: flex-start; gap: 12px;">
+                            <div style="flex-shrink: 0;">
+                                <img src="img/empresa_marca_agua.jpg" alt="Logo" style="width: 85px; height: 85px; object-fit: contain;" />
+                            </div>
+                            <div style="display: flex; flex-direction: column; justify-content: center; padding-top: 10px;">
+                                <div style="font-size: 17px; font-weight: bold; color: #1a237e; text-transform: uppercase; line-height: 1.2; margin-bottom: 4px;">VETERINARIA SAN MARTIN DE PORRES</div>
+                                <div style="font-size: 12px; color: #555;">Cédula Jurídica: 3-105-761559</div>
+                            </div>
                         </div>
-                        <div style="flex: 1; text-align: center; border: 1px solid #c5cae9; border-radius: 8px; padding: 16px; background: #fafafa;">
-                            <p style="font-size: 11px; font-weight: bold; margin: 0 0 10px; color: #1a237e; text-transform: uppercase; letter-spacing: 0.8px;">Firma del Administrador</p>
-                            <div style="border: 2px dashed #1565c0; border-radius: 6px; padding: 10px; background: white; min-height: 90px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
-                                ${firmaAdmin?.firmaDibujo
-                                    ? `<img src="${firmaAdmin.firmaDibujo}" alt="Firma admin" style="max-width: 100%; max-height: 80px;" />`
-                                    : `<p style="color: #bbb; font-size: 11px; font-style: italic; margin: 0;">Sin firma registrada</p>`}
-                            </div>
-                            <p style="font-size: 12px; font-weight: bold; margin: 4px 0; color: #000;">${firmaAdmin?.nombre || (req.respondidoPorNombre || 'Administrador')}</p>
-                            <p style="font-size: 11px; color: #555; margin: 2px 0;">${firmaAdmin?.rol ? (ROLES[firmaAdmin.rol]?.nombre || firmaAdmin.rol) : 'Administrador'}</p>
-                            ${firmaAdmin?.fecha ? `<p style="font-size: 10px; color: #888; margin: 2px 0;">${new Date(firmaAdmin.fecha).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>` : ''}
+                        <div style="text-align: right; font-size: 12px; color: #333; line-height: 1.8; padding-top: 10px;">
+                            <div><strong>COD:</strong> RC.400.5.1</div>
+                            <div><strong>Fecha:</strong> ${fechaSolicitudShort}</div>
+                            <div><strong>Solicitante:</strong> ${nombreCompleto}</div>
+                            <div><strong>Departamento:</strong> ${depNombre}</div>
+                            <div><strong>Página:</strong> ${pageLabel}</div>
                         </div>
                     </div>
+                </div>
+                <div style="text-align: center; margin-bottom: 28px;">
+                    <h1 style="font-size: 17px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: #1a237e; margin: 0 0 4px 0; border-bottom: 1px solid #c5cae9; padding-bottom: 8px; display: inline-block;">FIRMAS Y VALIDACIONES</h1>
+                </div>
+                <div style="margin-top: 10px; padding-top: 20px; border-top: 2px solid #1a237e;">
+                    ${firmasHtml}
                 </div>
             </div>
         </div>`;
@@ -969,10 +1150,19 @@ class PDFGenerator {
 
         const fSolLong = new Date(req.fechaSolicitud).toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' });
         const toDate = (str) => str ? new Date(str + 'T12:00:00').toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' }) : '_____';
+        const shiftDate = (str, days) => {
+            if (!str) return '_____';
+            const d = new Date(str + 'T12:00:00');
+            d.setDate(d.getDate() + days);
+            return d.toLocaleDateString('es-CR', { year: 'numeric', month: 'long', day: 'numeric' });
+        };
         const motivo = datos.motivo || '_______________________________________________';
 
         const fi = toDate(datos.fecha_inicio);
         const ff = toDate(datos.fecha_fin);
+        const fechaIngreso = toDate(datos.fecha_ingreso);
+        const ultimoDiaLabora = shiftDate(datos.fecha_inicio, -1);
+        const fechaReincorporacion = shiftDate(datos.fecha_fin, 1);
         const dias = (datos.fecha_inicio && datos.fecha_fin)
             ? `${RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin)} día(s)` : '_____';
 
@@ -995,14 +1185,19 @@ class PDFGenerator {
 
             case 'vacaciones': {
                 const obs = datos.observaciones ? `<p style="margin-bottom:6px;"><strong>Observaciones:</strong></p><p style="margin-bottom:14px;padding:8px 12px;background:#f5f5f5;border-left:3px solid #1a237e;border-radius:0 4px 4px 0;">${datos.observaciones}</p>` : '';
+                const ced = datos.cedula || '_____';
+                const puesto = datos.puesto || '_____';
                 return {
                     titulo: 'SOLICITUD DE DISFRUTE DE VACACIONES',
                     bodyHTML: `
-                        <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio solicito formalmente el disfrute de mis vacaciones acumuladas.</p>
-                        <p style="margin-bottom:14px;">El período de vacaciones solicitado comprende desde el día <strong>${fi}</strong> hasta el día <strong>${ff}</strong>, para un total de <strong>${dias}</strong> calendario, de conformidad con el artículo 59 del Código de Trabajo de la República de Costa Rica y las disposiciones aplicables en materia de descanso remunerado. Entiendo que el disfrute de vacaciones es un derecho irrenunciable reconocido por la legislación laboral costarricense.</p>
+                        <p style="margin-bottom:6px;"><strong>1. DATOS DEL COLABORADOR</strong></p>
+                        <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, número de cédula <strong>${ced}</strong>, con el puesto de <strong>${puesto}</strong>, del departamento / área de <strong>${dep}</strong>, con fecha de ingreso a la empresa <strong>${fechaIngreso}</strong>.</p>
+                        <p style="margin-bottom:14px;"><strong>2. PERIODO DE VACACIONES SOLICITADO</strong><br>De conformidad con lo establecido en el artículo 153 del Código de Trabajo de Costa Rica, solicito el disfrute de mis vacaciones anuales correspondientes al período laborado, en la cantidad de <strong>${dias}</strong> hábiles, siendo mi último día que laboro el <strong>${ultimoDiaLabora}</strong>, con fecha de inicio <strong>${fi}</strong>, fecha de finalización <strong>${ff}</strong> y fecha de reincorporación laboral <strong>${fechaReincorporacion}</strong>.</p>
                         ${obs}
-                        <p style="margin-bottom:14px;">Manifiesto que he coordinado con mi jefatura inmediata la cobertura de mis funciones durante el período de ausencia, a fin de no afectar la continuidad de los servicios de ${empresa}. Asimismo, me comprometo a dejar debidamente documentadas las labores pendientes y a estar disponible en la medida de lo posible para cualquier consulta urgente que pudiera surgir durante mi ausencia.</p>
-                        ${cierre}`
+                        <p style="margin-bottom:6px;"><strong>3. DECLARACIÓN DEL COLABORADOR</strong></p>
+                        <p style="margin-bottom:14px;">Declaro que he sido informado(a) de mis derechos y deberes en relación con el disfrute de vacaciones, conforme al Código de Trabajo de Costa Rica, y que el presente período ha sido coordinado con la empresa para no afectar la continuidad del servicio.</p>
+                        <p style="margin-bottom:6px;"><strong>4. AUTORIZACIÓN DEL PATRONO / REPRESENTANTE LEGAL</strong></p>
+                        <p style="margin-bottom:14px;">Hago constar que el período de vacaciones solicitado ha sido revisado y aprobado, cumpliendo con la normativa laboral vigente, y que durante dicho período el colaborador conservará todos sus derechos laborales.</p>`
                 };
             }
 
@@ -1092,6 +1287,51 @@ class PDFGenerator {
                         <p style="margin-bottom:14px;">La presente notificación tiene como fin dejar constancia formal del día festivo señalado, según lo establecido en el Código de Trabajo y la normativa laboral vigente. Entiendo que en los días feriados de carácter nacional el trabajador tiene derecho al descanso remunerado, salvo las excepciones previstas en la ley. Dejo constancia de que he informado con la debida anticipación a mi jefatura para que se tomen las medidas organizativas que correspondan.</p>
                         <p style="margin-bottom:14px;">Declaro que la información aquí consignada es veraz.</p>
                         <p style="margin-bottom:30px;">En Costa Rica, a los <strong>${fSolLong}</strong>.</p>`
+                };
+            }
+
+            case 'horas_extraordinarias': {
+                const ced = datos.cedula || '_____';
+                const puesto = datos.puesto || '_____';
+                const area = datos.area_departamento || dep;
+                const jef = datos.jefatura_inmediata || '_____';
+                const filas = Array.isArray(datos.filas) ? datos.filas : [];
+                let filasHtml = '';
+                filas.forEach((f) => {
+                    const fd = toDate(f.fecha);
+                    filasHtml += `<tr><td style="border:1px solid #ccc;padding:6px;">${fd}</td><td style="border:1px solid #ccc;padding:6px;">${f.hora_inicio || '—'}</td><td style="border:1px solid #ccc;padding:6px;">${f.hora_fin || '—'}</td><td style="border:1px solid #ccc;padding:6px;">${f.cantidad || '—'}</td><td style="border:1px solid #ccc;padding:6px;">${f.justificacion || '—'}</td></tr>`;
+                });
+                const tablaDetalle = filas.length
+                    ? `<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:16px;"><thead><tr style="background:#e8eaf6;"><th style="border:1px solid #ccc;padding:6px;">Fecha</th><th style="border:1px solid #ccc;padding:6px;">Inicio</th><th style="border:1px solid #ccc;padding:6px;">Fin</th><th style="border:1px solid #ccc;padding:6px;">Cantidad</th><th style="border:1px solid #ccc;padding:6px;">Justificación</th></tr></thead><tbody>${filasHtml}</tbody></table>`
+                    : '<p style="font-style:italic;color:#666;">Sin filas registradas.</p>';
+                const rev = req.revisionTI;
+                const sec3 = `<div style="margin-top:20px;padding:12px;background:#fafafa;border-left:4px solid #006064;border-radius:0 4px 4px 0;">
+                        <p style="font-weight:bold;margin:0 0 8px;">3. REVISIÓN POR PARTE DEL DEPARTAMENTO DE TI</p>
+                        <p style="margin:0 0 10px;font-size:12px;">El Departamento de Tecnologías de Información certifica haber revisado los registros institucionales disponibles con el fin de verificar la consistencia de la información reportada.</p>
+                        <p style="margin:0;font-size:12px;"><strong>Nombre del responsable de TI:</strong> ${rev?.nombre || '______________________________'}</p>
+                    </div>`;
+                const apr = req.estado === 'aprobada';
+                const rec = req.estado === 'rechazada';
+                const sec4 = `<div style="margin-top:16px;padding:12px;background:#fafafa;border-left:4px solid #1a237e;border-radius:0 4px 4px 0;">
+                        <p style="font-weight:bold;margin:0 0 8px;">4. RESOLUCIÓN DE GERENCIA</p>
+                        <p style="margin:0 0 10px;font-size:12px;">La Gerencia, luego de revisar la justificación y las verificaciones realizadas, procede a:</p>
+                        <p style="margin:4px 0;font-size:12px;">${apr ? '☑' : '☐'} Aprobar el reconocimiento de las horas extraordinarias reportadas.</p>
+                        <p style="margin:4px 0;font-size:12px;">${rec ? '☑' : '☐'} Rechazar el reconocimiento de las horas extraordinarias reportadas.</p>
+                        <p style="margin-top:12px;font-size:12px;"><strong>Justificación de la resolución (si aplica):</strong></p>
+                        <p style="margin:4px 0;font-size:12px;min-height:40px;">${req.justificacion || '—'}</p>
+                    </div>`;
+                return {
+                    titulo: 'FORMULARIO OFICIAL DE REPORTE Y AUTORIZACIÓN DE HORAS EXTRAORDINARIAS',
+                    bodyHTML: `
+                        <p style="font-weight:bold;margin-bottom:8px;">1. IDENTIFICACIÓN DEL COLABORADOR</p>
+                        <p style="font-size:12px;margin-bottom:16px;">
+                            Yo, <strong>${nombre}</strong>, número de identificación <strong>${ced}</strong>, con puesto de <strong>${puesto}</strong>, adscrito(a) al área/departamento de <strong>${area}</strong>, bajo la jefatura inmediata de <strong>${jef}</strong>.
+                        </p>
+                        <p style="font-weight:bold;margin-bottom:8px;">2. DETALLE DE LAS HORAS EXTRAORDINARIAS REPORTADAS</p>
+                        ${tablaDetalle}
+                        <p style="font-size:12px;margin-bottom:20px;">Declaro que la información consignada es veraz. En Costa Rica, a los <strong>${fSolLong}</strong>.</p>
+                        ${sec3}
+                        ${sec4}`
                 };
             }
 
