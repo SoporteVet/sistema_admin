@@ -7,6 +7,21 @@ class App {
     static currentView = 'dashboard';
     static isLoading = false;
 
+    static escapeHtml(value = '') {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    static escapeJsString(value = '') {
+        return String(value)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'");
+    }
+
     static init() {
         // Mostrar pantalla de carga mientras Firebase verifica el auth
         this.showLoading(true);
@@ -2042,6 +2057,16 @@ class App {
                 const diasTxt = (datos.fecha_inicio && datos.fecha_fin)
                     ? `${RequestManager.calcDays(datos.fecha_inicio, datos.fecha_fin)} día(s)`
                     : '_____';
+                const fechaReintegroTxt = datos.fecha_fin
+                    ? (() => {
+                        const d = new Date(datos.fecha_fin + 'T12:00:00');
+                        d.setDate(d.getDate() + 1);
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        return formatDate(`${y}-${m}-${day}`);
+                    })()
+                    : '_____';
                 const motivoTxt = datos.motivo || '______________________________';
                 const fechaSolicitudTxt = formatDate(req.fechaSolicitud);
 
@@ -2049,7 +2074,7 @@ class App {
 
 Yo, ${nombreCompleto}, quien laboro para ${empresa}, adscrito(a) al departamento de ${depNombre}, por este medio solicito formalmente un permiso sin goce de salario.
 
-El permiso se solicita para el período comprendido desde el día ${fechaInicioTxt} hasta el día ${fechaFinTxt}, para un total de ${diasTxt} calendario, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.
+El permiso se solicita para el período comprendido desde el día ${fechaInicioTxt} hasta el día ${fechaFinTxt}, para un total de ${diasTxt} calendario, con fecha de reintegro laboral el ${fechaReintegroTxt}, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.
 
 Motivo del permiso:
 ${motivoTxt}
@@ -2307,7 +2332,7 @@ ${texto}</pre>
 
         switch (req.tipo) {
             case 'sin_goce':
-                return `SOLICITUD DE PERMISO SIN GOCE SALARIAL\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente un permiso sin goce de salario.\n\nEl permiso se solicita para el período comprendido desde el día ${fi} hasta el día ${ff}, para un total de ${dias} calendario, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.\n\nMotivo del permiso:\n${motivo}\n\nManifiesto que entiendo y acepto que durante este período no devengaré salario ni beneficios salariales asociados, y que el puesto de trabajo, así como las obligaciones y responsabilidades, se mantienen vigentes al término del presente permiso, de acuerdo con la normativa laboral costarricense y la normativa interna de ${empresa}.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
+                return `SOLICITUD DE PERMISO SIN GOCE SALARIAL\n\nYo, ${nombre}, quien laboro para ${empresa}, adscrito(a) al departamento de ${dep}, por este medio solicito formalmente un permiso sin goce de salario.\n\nEl permiso se solicita para el período comprendido desde el día ${fi} hasta el día ${ff}, para un total de ${dias} calendario, con fecha de reintegro laboral el ${fechaReincorporacion}, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.\n\nMotivo del permiso:\n${motivo}\n\nManifiesto que entiendo y acepto que durante este período no devengaré salario ni beneficios salariales asociados, y que el puesto de trabajo, así como las obligaciones y responsabilidades, se mantienen vigentes al término del presente permiso, de acuerdo con la normativa laboral costarricense y la normativa interna de ${empresa}.\n\nDeclaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.\n\nEn Costa Rica, a los ${fSolicitud}.`;
 
             case 'vacaciones': {
                 const obs = datos.observaciones ? `\n\nObservaciones:\n${datos.observaciones}` : '';
@@ -2917,8 +2942,10 @@ ${texto}</pre>
                                 ${departamentos.map(dep => {
                                     const categoriasCount = dep.categorias ? Object.keys(dep.categorias).length : 0;
                                     const activo = dep.activo !== false; // Por defecto activo
+                                    const depKey = dep.codigo || dep.id;
+                                    const depKeyEscaped = this.escapeJsString(depKey);
                                     return `<tr>
-                                        <td><strong>${dep.codigo || dep.id}</strong></td>
+                                        <td><strong>${this.escapeHtml(depKey)}</strong></td>
                                         <td>
                                             <div style="display:flex;align-items:center;gap:10px;">
                                                 <div style="width:40px;height:40px;background:${dep.color || '#546e7a'};border-radius:8px;display:flex;align-items:center;justify-content:center;color:white;">
@@ -2938,13 +2965,13 @@ ${texto}</pre>
                                         <td><span class="status-badge ${activo ? 'aprobada' : 'rechazada'}">${activo ? 'Activo' : 'Inactivo'}</span></td>
                                         <td>
                                             <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                                                <button class="btn btn-sm btn-outline" onclick="App.showEditDepartamentoModal('${dep.codigo || dep.id}')" title="Editar">
+                                                <button class="btn btn-sm btn-outline" onclick="App.showEditDepartamentoModal('${depKeyEscaped}')" title="Editar">
                                                     <i class="fas fa-edit"></i>
                                                 </button>
-                                                <button class="btn btn-sm btn-outline" onclick="App.showViewDepartamentoModal('${dep.codigo || dep.id}')" title="Ver detalles">
+                                                <button class="btn btn-sm btn-outline" onclick="App.showViewDepartamentoModal('${depKeyEscaped}')" title="Ver detalles">
                                                     <i class="fas fa-eye"></i>
                                                 </button>
-                                                <button class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.handleDeleteDepartamento('${dep.codigo || dep.id}')" title="Eliminar">
+                                                <button class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.handleDeleteDepartamento('${depKeyEscaped}')" title="Eliminar">
                                                     <i class="fas fa-trash"></i>
                                                 </button>
                                             </div>
@@ -3004,8 +3031,8 @@ ${texto}</pre>
             <form onsubmit="App.handleCreateDepartamento(event)">
                 <div class="form-group">
                     <label>Código <span class="required">*</span></label>
-                    <input type="text" class="form-control" id="newDepCodigo" placeholder="Ej: DG-100" required pattern="[A-Z0-9-]+" style="text-transform:uppercase;">
-                    <p class="form-help">Código único del departamento (solo letras mayúsculas, números y guiones)</p>
+                    <input type="text" class="form-control" id="newDepCodigo" placeholder="Ej: DG-100" required pattern="[A-Za-z0-9\-]+" style="text-transform:uppercase;" oninput="this.value=this.value.replace(/[^A-Za-z0-9\-]/g,'').toUpperCase()">
+                    <p class="form-help" style="color:var(--text-secondary);">Solo letras, números y guiones (<strong>-</strong>). No se permiten puntos ni caracteres especiales.</p>
                 </div>
                 <div class="form-group">
                     <label>Nombre <span class="required">*</span></label>
@@ -3050,6 +3077,15 @@ ${texto}</pre>
         const color = document.getElementById('newDepColor').value;
         const icono = document.getElementById('newDepIcono').value;
         let categorias = {};
+
+        // Validar que el código no tenga caracteres inválidos para Firebase
+        const FIREBASE_INVALID = /[.#$\[\]\/]/;
+        if (FIREBASE_INVALID.test(codigo)) {
+            Toast.error('Código inválido', 'El código no puede contener ".", "#", "$", "/", "[" o "]". Use solo letras, números y guiones.');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-plus"></i> Crear';
+            return;
+        }
 
         // Intentar parsear categorías si se proporcionaron
         const categoriasText = document.getElementById('newDepCategorias').value.trim();
@@ -3108,18 +3144,27 @@ ${texto}</pre>
             `<option value="${icon.value}" ${dep.icono === icon.value ? 'selected' : ''}>${icon.label}</option>`
         ).join('');
 
-        const categoriasJson = JSON.stringify(dep.categorias || {}, null, 2);
+        // Si Firebase no tiene categorías guardadas, usar las de data.js como base
+        const depCategorias = (dep.categorias && Object.keys(dep.categorias).length > 0)
+            ? dep.categorias
+            : (DEPARTAMENTOS[depId]?.categorias || {});
+        const categoriasJson = JSON.stringify(depCategorias, null, 2);
+        const depIdEscaped = this.escapeJsString(depId);
+        const depCodigoEscaped = this.escapeHtml(dep.codigo || depId);
+        const depNombreEscaped = this.escapeHtml(dep.nombre || '');
+        const categoriasJsonEscaped = this.escapeHtml(categoriasJson);
+        const tieneCatsDeDataJs = !(dep.categorias && Object.keys(dep.categorias).length > 0) && Object.keys(depCategorias).length > 0;
 
         this.showModal('Editar Departamento', `
-            <form onsubmit="App.handleEditDepartamento(event, '${depId}')">
+            <form onsubmit="App.handleEditDepartamento(event, '${depIdEscaped}')">
                 <div class="form-group">
                     <label>Código</label>
-                    <input type="text" class="form-control" id="editDepCodigo" value="${dep.codigo || depId}" disabled style="background:var(--bg-secondary);">
+                    <input type="text" class="form-control" id="editDepCodigo" value="${depCodigoEscaped}" disabled style="background:var(--bg-secondary);">
                     <p class="form-help">El código no se puede modificar</p>
                 </div>
                 <div class="form-group">
                     <label>Nombre <span class="required">*</span></label>
-                    <input type="text" class="form-control" id="editDepNombre" value="${dep.nombre}" required>
+                    <input type="text" class="form-control" id="editDepNombre" value="${depNombreEscaped}" required>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
@@ -3135,7 +3180,11 @@ ${texto}</pre>
                 </div>
                 <div class="form-group">
                     <label>Categorías</label>
-                    <textarea class="form-control" id="editDepCategorias" rows="8" style="font-family:monospace;font-size:0.85rem;">${categoriasJson}</textarea>
+                    ${tieneCatsDeDataJs ? `<div style="padding:8px 12px;background:rgba(255,152,0,0.12);border-left:3px solid var(--warning);border-radius:4px;margin-bottom:8px;font-size:0.82rem;color:var(--warning);">
+                        <i class="fas fa-info-circle" style="margin-right:6px;"></i>
+                        Categorías cargadas desde la configuración base. Guarda para sincronizarlas con Firebase.
+                    </div>` : ''}
+                    <textarea class="form-control" id="editDepCategorias" rows="12" style="font-family:monospace;font-size:0.82rem;">${categoriasJsonEscaped}</textarea>
                     <p class="form-help" style="font-size:0.75rem;margin-top:4px;">Formato JSON. Modifique con cuidado para mantener la estructura válida.</p>
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
@@ -3296,7 +3345,10 @@ ${texto}</pre>
         const result = await DepartamentoManager.syncFromDataJs();
 
         if (result.success) {
-            Toast.success('Sincronizado', `Se sincronizaron ${result.synced} departamento(s)`);
+            const msg = result.synced === 0
+                ? 'Todos los departamentos ya estaban actualizados'
+                : `${result.created || 0} creado(s), ${result.updated || 0} actualizado(s) con categorías`;
+            Toast.success('Sincronizado', msg);
             this.navigate('departamentos');
         } else {
             Toast.error('Error', result.message || 'No se pudo sincronizar');

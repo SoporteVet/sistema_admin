@@ -1168,7 +1168,7 @@ class PDFGenerator {
 
         const cierre = `
             <p style="margin-bottom: 14px;">Declaro que la información aquí consignada es veraz y asumo la responsabilidad correspondiente.</p>
-            <p style="margin-bottom: 30px;">En Costa Rica, a los <strong>${fSolLong}</strong>.</p>`;
+            <p style="margin-bottom: 30px;">En Costa Rica, el <strong>${fSolLong}</strong>.</p>`;
 
         switch (req.tipo) {
             case 'sin_goce':
@@ -1176,9 +1176,9 @@ class PDFGenerator {
                     titulo: 'SOLICITUD DE PERMISO SIN GOCE SALARIAL',
                     bodyHTML: `
                         <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio solicito formalmente un permiso sin goce de salario.</p>
-                        <p style="margin-bottom:14px;">El permiso se solicita para el período comprendido desde el día <strong>${fi}</strong> hasta el día <strong>${ff}</strong>, para un total de <strong>${dias}</strong> calendario, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.</p>
+                        <p style="margin-bottom:14px;">El permiso se solicita para el período comprendido desde el día <strong>${fi}</strong> hasta el día <strong>${ff}</strong>, para un total de <strong>${dias}</strong> calendario, con fecha de reintegro laboral el <strong>${fechaReincorporacion}</strong>, de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica y las disposiciones emitidas por el Ministerio de Trabajo y Seguridad Social, así como las políticas internas de ${empresa}.</p>
                         <p style="margin-bottom:6px;"><strong>Motivo del permiso:</strong></p>
-                        <p style="margin-bottom:14px;padding:8px 12px;background:#f5f5f5;border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
+                        <p style="margin-bottom:14px;padding:10px 14px;background:rgba(255,255,255,0.4);border:1px solid #c5cae9;border-left:4px solid #1a237e;border-radius:0 6px 6px 0;color:#1a1a1a;line-height:1.55;">${motivo}</p>
                         <p style="margin-bottom:14px;">Manifiesto que entiendo y acepto que durante este período no devengaré salario ni beneficios salariales asociados, y que el puesto de trabajo, así como las obligaciones y responsabilidades, se mantienen vigentes al término del presente permiso, de acuerdo con la normativa laboral costarricense y la normativa interna de ${empresa}.</p>
                         ${cierre}`
                 };
@@ -1208,11 +1208,11 @@ class PDFGenerator {
                     titulo: 'SOLICITUD DE INGRESO POSTERIOR',
                     bodyHTML: `
                         <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio notifico formalmente que el día <strong>${fecha}</strong> realizaré mi ingreso de forma posterior al horario habitual establecido.</p>
-                        <div style="margin-bottom:14px;padding:10px 14px;background:#f5f5f5;border-radius:4px;">
+                        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(245,245,245,0.4);border:1px solid rgba(197,202,233,0.55);border-radius:4px;">
                             <p style="margin:0;"><strong>Hora de ingreso:</strong> ${hora}</p>
                         </div>
                         <p style="margin-bottom:6px;"><strong>Motivo:</strong></p>
-                        <p style="margin-bottom:14px;padding:8px 12px;background:#f5f5f5;border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
+                        <p style="margin-bottom:14px;padding:8px 12px;background:rgba(245,245,245,0.4);border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
                         <p style="margin-bottom:14px;">Manifiesto que tomaré las medidas necesarias para compensar el tiempo de ausencia de conformidad con las políticas internas de ${empresa} y lo dispuesto en el Código de Trabajo. Entiendo que los ingresos posteriores deben ser debidamente justificados y que la empresa podrá solicitar los comprobantes que estime convenientes. Me comprometo a cumplir con la jornada laboral correspondiente y a no afectar el normal desarrollo de las actividades del departamento.</p>
                         ${cierre}`
                 };
@@ -1225,12 +1225,12 @@ class PDFGenerator {
                     titulo: 'SOLICITUD DE SALIDA ANTICIPADA',
                     bodyHTML: `
                         <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio solicito formalmente autorización para retirarme antes del horario laboral establecido.</p>
-                        <div style="margin-bottom:14px;padding:10px 14px;background:#f5f5f5;border-radius:4px;">
+                        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(245,245,245,0.4);border:1px solid rgba(197,202,233,0.55);border-radius:4px;">
                             <p style="margin:0 0 4px;"><strong>Fecha:</strong> ${fecha}</p>
                             <p style="margin:0;"><strong>Hora de salida anticipada:</strong> ${hora}</p>
                         </div>
                         <p style="margin-bottom:6px;"><strong>Motivo:</strong></p>
-                        <p style="margin-bottom:14px;padding:8px 12px;background:#f5f5f5;border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
+                        <p style="margin-bottom:14px;padding:8px 12px;background:rgba(245,245,245,0.4);border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
                         <p style="margin-bottom:14px;">Manifiesto que coordinaré con mi jefatura la compensación del tiempo correspondiente de conformidad con las políticas internas de ${empresa}. Entiendo que la salida anticipada queda sujeta a las necesidades del servicio y al criterio del superior inmediato. Me comprometo a dejar en orden las labores bajo mi responsabilidad y a reponer las horas no trabajadas según lo acordado con la empresa.</p>
                         ${cierre}`
                 };
@@ -1243,15 +1243,15 @@ class PDFGenerator {
                 return {
                     titulo: 'SOLICITUD DE CAMBIO DE HORARIO',
                     bodyHTML: `
-                        <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio solicito formalmente la modificación de mi horario de trabajo.</p>
-                        <div style="margin-bottom:14px;padding:10px 14px;background:#f5f5f5;border-radius:4px;">
+                        <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio solicito formalmente la modificación permanente de mi horario de trabajo.</p>
+                        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(245,245,245,0.4);border:1px solid rgba(197,202,233,0.55);border-radius:4px;">
                             <p style="margin:0 0 4px;"><strong>Horario actual:</strong> ${actual}</p>
                             <p style="margin:0 0 4px;"><strong>Horario solicitado:</strong> ${solicitado}</p>
                             <p style="margin:0;"><strong>Fecha de aplicación:</strong> ${fecha}</p>
                         </div>
                         <p style="margin-bottom:6px;"><strong>Motivo del cambio:</strong></p>
-                        <p style="margin-bottom:14px;padding:8px 12px;background:#f5f5f5;border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
-                        <p style="margin-bottom:14px;">Manifiesto que el cambio de horario solicitado no afectará negativamente el desempeño de mis funciones ni la prestación de los servicios de ${empresa}, y me comprometo a cumplir con la totalidad de las horas laborales establecidas. Entiendo que la modificación del horario queda sujeta a la aprobación de la jefatura y a las necesidades operativas de la organización. Una vez aprobado, me comprometo a cumplir de manera puntual y responsable el nuevo horario.</p>
+                        <p style="margin-bottom:14px;padding:8px 12px;background:rgba(245,245,245,0.4);border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
+                        <p style="margin-bottom:14px;">Manifiesto que el cambio de horario solicitado no afectará negativamente el desempeño de mis funciones ni la prestación de los servicios a la ${empresa}, y me comprometo a cumplir con la totalidad de las horas laborales establecidas. Entiendo que la modificación del horario queda sujeta a la aprobación de la jefatura y a las necesidades operativas de la organización. Una vez aprobado, me comprometo a cumplir de manera puntual y responsable el nuevo horario.</p>
                         ${cierre}`
                 };
             }
@@ -1262,12 +1262,12 @@ class PDFGenerator {
                     titulo: 'SOLICITUD DE PERMISO DE ESTUDIO',
                     bodyHTML: `
                         <p style="margin-bottom:14px;">Yo, <strong>${nombre}</strong>, quien laboro para <strong>${empresa}</strong>, adscrito(a) al departamento de <strong>${dep}</strong>, por este medio solicito formalmente un permiso para actividades de formación académica.</p>
-                        <div style="margin-bottom:14px;padding:10px 14px;background:#f5f5f5;border-radius:4px;">
+                        <div style="margin-bottom:14px;padding:10px 14px;background:rgba(245,245,245,0.4);border:1px solid rgba(197,202,233,0.55);border-radius:4px;">
                             <p style="margin:0 0 4px;"><strong>Institución educativa:</strong> ${inst}</p>
                             <p style="margin:0;"><strong>Período:</strong> desde el día ${fi} hasta el día ${ff}, para un total de ${dias}.</p>
                         </div>
                         <p style="margin-bottom:6px;"><strong>Motivo:</strong></p>
-                        <p style="margin-bottom:14px;padding:8px 12px;background:#f5f5f5;border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
+                        <p style="margin-bottom:14px;padding:8px 12px;background:rgba(245,245,245,0.4);border-left:3px solid #1a237e;border-radius:0 4px 4px 0;font-style:italic;">${motivo}</p>
                         <p style="margin-bottom:14px;">El presente permiso se solicita de conformidad con lo establecido en el Código de Trabajo de la República de Costa Rica respecto a permisos de capacitación y estudio, así como las políticas internas de ${empresa}. Manifiesto que la formación que recibiré contribuirá a mi desarrollo profesional y, en consecuencia, al mejor desempeño de mis labores. Me comprometo a coordinar con mi jefatura las fechas de ausencia y a no afectar el normal desarrollo de las actividades del departamento.</p>
                         ${cierre}`
                 };
@@ -1286,8 +1286,8 @@ class PDFGenerator {
                         </div>
                         <p style="margin-bottom:14px;">La presente notificación tiene como fin dejar constancia formal del día festivo señalado, según lo establecido en el Código de Trabajo y la normativa laboral vigente. Entiendo que en los días feriados de carácter nacional el trabajador tiene derecho al descanso remunerado, salvo las excepciones previstas en la ley. Dejo constancia de que he informado con la debida anticipación a mi jefatura para que se tomen las medidas organizativas que correspondan.</p>
                         <p style="margin-bottom:14px;">Declaro que la información aquí consignada es veraz.</p>
-                        <p style="margin-bottom:30px;">En Costa Rica, a los <strong>${fSolLong}</strong>.</p>`
-                };
+                        <p style="margin-bottom:30px;">En Costa Rica, el <strong>${fSolLong}</strong>.</p>`
+                }
             }
 
             case 'horas_extraordinarias': {
@@ -1307,8 +1307,8 @@ class PDFGenerator {
                 const rev = req.revisionTI;
                 const sec3 = `<div style="margin-top:20px;padding:12px;background:#fafafa;border-left:4px solid #006064;border-radius:0 4px 4px 0;">
                         <p style="font-weight:bold;margin:0 0 8px;">3. REVISIÓN POR PARTE DEL DEPARTAMENTO DE TI</p>
-                        <p style="margin:0 0 10px;font-size:12px;">El Departamento de Tecnologías de Información certifica haber revisado los registros institucionales disponibles con el fin de verificar la consistencia de la información reportada.</p>
-                        <p style="margin:0;font-size:12px;"><strong>Nombre del responsable de TI:</strong> ${rev?.nombre || '______________________________'}</p>
+                        <p style="margin:0 0 10px;font-size:12px;">El Departamento de Tecnologías de Información certifica haber revisado los registros institucionales disponible, confirmando la veracidad de la información reportada.</p>
+                        <p style="margin:0;font-size:12px;"><strong>Nombre del responsable de TI:</strong> ${rev?.nombre || '______________________________.'}</p>
                     </div>`;
                 const apr = req.estado === 'aprobada';
                 const rec = req.estado === 'rechazada';
@@ -1329,7 +1329,7 @@ class PDFGenerator {
                         </p>
                         <p style="font-weight:bold;margin-bottom:8px;">2. DETALLE DE LAS HORAS EXTRAORDINARIAS REPORTADAS</p>
                         ${tablaDetalle}
-                        <p style="font-size:12px;margin-bottom:20px;">Declaro que la información consignada es veraz. En Costa Rica, a los <strong>${fSolLong}</strong>.</p>
+                        <p style="font-size:12px;margin-bottom:20px;">Declaro que la información consignada es veraz. En Costa Rica, el <strong>${fSolLong}</strong>.</p>
                         ${sec3}
                         ${sec4}`
                 };
