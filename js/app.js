@@ -7,6 +7,26 @@ class App {
     static currentView = 'dashboard';
     static isLoading = false;
 
+    // Cache de departamentos fusionado (DEPARTAMENTOS estático + Firebase)
+    static _depsMap = { ...DEPARTAMENTOS };
+    static _depsLoaded = false;
+
+    static async ensureDepsLoaded() {
+        if (this._depsLoaded) return;
+        try {
+            const list = await DepartamentoManager.getAll();
+            const map = {};
+            list.forEach(dep => {
+                const key = dep.id || dep.codigo;
+                if (key) map[key] = dep;
+            });
+            this._depsMap = map;
+            this._depsLoaded = true;
+        } catch (e) {
+            // Fallback al objeto estático
+        }
+    }
+
     static escapeHtml(value = '') {
         return String(value)
             .replace(/&/g, '&amp;')
@@ -87,6 +107,8 @@ class App {
         document.getElementById('loadingScreen').style.display = 'none';
         this.updateSidebar();
         this.setupRealtimeNotifications();
+        this._depsLoaded = false;
+        this.ensureDepsLoaded();
         this.navigate('dashboard');
     }
 
@@ -301,7 +323,7 @@ class App {
                         ${docStats.recientes.length > 0 ? `
                             <div class="doc-list" style="padding:12px;">
                                 ${docStats.recientes.map(doc => {
-                                    const dep = DEPARTAMENTOS[doc.departamento];
+                                    const dep = App._depsMap[doc.departamento] || DEPARTAMENTOS[doc.departamento];
                                     return `
                                     <div class="doc-item" onclick="App.navigate('ver-documento', {id:'${doc.id}'})">
                                         <div class="doc-icon" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-file'}"></i></div>
@@ -368,16 +390,18 @@ class App {
         const user = AuthManager.getUser();
         const content = document.getElementById('contentArea');
 
+        await this.ensureDepsLoaded();
+
         let depsHtml = '';
         if (AuthManager.isAdmin()) {
-            Object.keys(DEPARTAMENTOS).forEach(key => {
-                const dep = DEPARTAMENTOS[key];
-                depsHtml += `<option value="${key}">${dep.nombre} (${dep.codigo})</option>`;
+            Object.keys(App._depsMap).forEach(key => {
+                const dep = App._depsMap[key];
+                depsHtml += `<option value="${key}">${dep.nombre} (${dep.codigo || key})</option>`;
             });
         } else {
-            const dep = DEPARTAMENTOS[user.departamento];
+            const dep = App._depsMap[user.departamento];
             if (dep) {
-                depsHtml = `<option value="${user.departamento}">${dep.nombre} (${dep.codigo})</option>`;
+                depsHtml = `<option value="${user.departamento}">${dep.nombre} (${dep.codigo || user.departamento})</option>`;
             }
         }
 
@@ -517,9 +541,9 @@ class App {
         catSelect.disabled = true;
         subSelect.disabled = true;
 
-        if (depId && DEPARTAMENTOS[depId]) {
-            const dep = DEPARTAMENTOS[depId];
-            Object.keys(dep.categorias).forEach(key => {
+        if (depId && App._depsMap[depId]) {
+            const dep = App._depsMap[depId];
+            Object.keys(dep.categorias || {}).forEach(key => {
                 catSelect.innerHTML += `<option value="${key}">${key}. ${dep.categorias[key].nombre}</option>`;
             });
             catSelect.disabled = false;
@@ -534,8 +558,8 @@ class App {
         subSelect.innerHTML = '<option value="">Seleccionar tipo...</option>';
         subSelect.disabled = true;
 
-        if (depId && catId && DEPARTAMENTOS[depId]) {
-            const cat = DEPARTAMENTOS[depId].categorias[catId];
+        if (depId && catId && App._depsMap[depId]) {
+            const cat = (App._depsMap[depId].categorias || {})[catId];
             if (cat) {
                 Object.keys(cat.subcategorias).forEach(key => {
                     subSelect.innerHTML += `<option value="${key}">${key}. ${cat.subcategorias[key]}</option>`;
@@ -563,7 +587,7 @@ class App {
         // Agrupar por departamento para mejor organización
         const usersByDep = {};
         available.forEach(u => {
-            const dep = DEPARTAMENTOS[u.departamento];
+            const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
             const depName = dep ? dep.nombre : 'Sin departamento';
             if (!usersByDep[depName]) usersByDep[depName] = [];
             usersByDep[depName].push(u);
@@ -573,7 +597,7 @@ class App {
         Object.keys(usersByDep).sort().forEach(depName => {
             html += `<div style="margin-bottom:8px;"><strong style="font-size:0.85rem;color:var(--text-secondary);display:block;margin-bottom:6px;">${depName}</strong><div style="display:flex;flex-wrap:wrap;gap:8px;">`;
             usersByDep[depName].forEach(u => {
-                const dep = DEPARTAMENTOS[u.departamento];
+                const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
                 html += `
                     <label style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:0.82rem;transition:var(--transition);background:white;">
                         <input type="checkbox" class="firmante-check" value="${u.id}">
@@ -606,9 +630,9 @@ class App {
             return;
         }
 
-        const dep = DEPARTAMENTOS[depId];
-        const cat = dep.categorias[catId];
-        const tipoNombre = cat.subcategorias[subId];
+        const dep = App._depsMap[depId] || DEPARTAMENTOS[depId];
+        const cat = (dep?.categorias || {})[catId];
+        const tipoNombre = cat?.subcategorias?.[subId];
 
         const firmasRequeridas = [];
         document.querySelectorAll('.firmante-check:checked').forEach(cb => {
@@ -652,7 +676,7 @@ class App {
         const contenido = document.getElementById('docEditor').innerHTML;
         const depId = document.getElementById('docDepartamento').value;
         const subId = document.getElementById('docSubcategoria').value;
-        const dep = DEPARTAMENTOS[depId];
+        const dep = App._depsMap[depId] || DEPARTAMENTOS[depId];
         const previewCode = depId && subId ? `${depId}-${subId}-XXX` : 'Código pendiente';
 
         this.showModal('Vista Previa del Documento', `
@@ -687,12 +711,14 @@ class App {
                 return firmasRequeridas.includes(user.id) || d.creadoPor === user.id;
             });
         }
+
+        await this.ensureDepsLoaded();
         
         const content = document.getElementById('contentArea');
 
         let depFilterHtml = '<option value="">Todos los departamentos</option>';
-        Object.keys(DEPARTAMENTOS).forEach(key => {
-            depFilterHtml += `<option value="${key}">${DEPARTAMENTOS[key].nombre}</option>`;
+        Object.keys(App._depsMap).forEach(key => {
+            depFilterHtml += `<option value="${key}">${App._depsMap[key].nombre}</option>`;
         });
 
         content.innerHTML = `
@@ -731,7 +757,7 @@ class App {
 
         return `<div class="doc-list">
             ${docs.sort((a, b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)).map(doc => {
-                const dep = DEPARTAMENTOS[doc.departamento];
+                const dep = App._depsMap[doc.departamento] || DEPARTAMENTOS[doc.departamento];
                 const firmas = doc.firmas ? Object.keys(doc.firmas).length : 0;
                 const firmasRequeridas = doc.firmasRequeridas ? doc.firmasRequeridas.length : 0;
                 const canManage = AuthManager.isAdmin() || AuthManager.isEncargado();
@@ -793,7 +819,7 @@ class App {
             return;
         }
 
-        const dep = DEPARTAMENTOS[doc.departamento];
+        const dep = App._depsMap[doc.departamento] || DEPARTAMENTOS[doc.departamento];
         const user = AuthManager.getUser();
         const allFirmas = doc.firmas ? Object.values(doc.firmas) : [];
         // En "Firmas Digitales" solo mostrar la firma del encargado (creador del documento)
@@ -821,7 +847,7 @@ class App {
                                 <div class="signature-item">
                                     <div class="sig-check"><i class="fas fa-check-circle"></i></div>
                                     <div class="sig-name">${f.nombre}</div>
-                                    <div class="sig-role">${ROLES[f.rol]?.nombre || f.rol} — ${DEPARTAMENTOS[f.departamento]?.nombre || ''}</div>
+                                    <div class="sig-role">${ROLES[f.rol]?.nombre || f.rol} — ${(App._depsMap[f.departamento] || DEPARTAMENTOS[f.departamento])?.nombre || ''}</div>
                                     <div class="sig-date">${formatDateTime(f.fecha)}</div>
                                     <div class="sig-code">Código: ${f.codigoVerificacion}</div>
                                     ${f.firmaDibujo ? `
@@ -1274,7 +1300,7 @@ class App {
                                 <tbody>
                                     ${usuariosRequeridos.map(item => {
                                         const user = item.user;
-                                        const dep = DEPARTAMENTOS[user.departamento];
+                                        const dep = App._depsMap[user.departamento] || DEPARTAMENTOS[user.departamento];
                                         return `
                                             <tr>
                                                 <td>
@@ -1931,7 +1957,7 @@ class App {
             const user = AuthManager.getUser() || {};
             const res = this.collectHorasExtraFormDatos(false);
             const d = res.datos || {};
-            const depNombre = DEPARTAMENTOS[user.departamento]?.nombre || '';
+            const depNombre = (App._depsMap[user.departamento] || DEPARTAMENTOS[user.departamento])?.nombre || '';
             if (!d.area_departamento && depNombre) d.area_departamento = depNombre;
             const fakeReq = {
                 tipo: 'horas_extraordinarias',
@@ -2050,7 +2076,7 @@ class App {
                 const user = AuthManager.getUser() || {};
                 const empresa = APP_CONFIG?.appName || 'La empresa';
                 const nombreCompleto = req.solicitanteNombre || 'Empleado';
-                const depNombre = DEPARTAMENTOS[req.departamento]?.nombre || 'su departamento';
+                const depNombre = (App._depsMap[req.departamento] || DEPARTAMENTOS[req.departamento])?.nombre || 'su departamento';
 
                 const fechaInicioTxt = datos.fecha_inicio ? formatDate(datos.fecha_inicio) : '_____';
                 const fechaFinTxt = datos.fecha_fin ? formatDate(datos.fecha_fin) : '_____';
@@ -2103,7 +2129,7 @@ ${texto}</pre>
                     <td style="padding:4px 6px;border:1px solid var(--border-light);">${f.justificacion || '—'}</td></tr>`).join('');
                 detalleHtml += `<div style="margin-top:10px;font-size:0.82rem;">
                     <strong>Identificación:</strong> ${datos.cedula || '—'} &nbsp;|&nbsp; <strong>Puesto:</strong> ${datos.puesto || '—'}<br>
-                    <strong>Área:</strong> ${datos.area_departamento || DEPARTAMENTOS[req.departamento]?.nombre || '—'} &nbsp;|&nbsp; <strong>Jefatura:</strong> ${datos.jefatura_inmediata || '—'}
+                    <strong>Área:</strong> ${datos.area_departamento || (App._depsMap[req.departamento] || DEPARTAMENTOS[req.departamento])?.nombre || '—'} &nbsp;|&nbsp; <strong>Jefatura:</strong> ${datos.jefatura_inmediata || '—'}
                     </div>
                     <div style="overflow-x:auto;margin-top:8px;"><table style="width:100%;border-collapse:collapse;font-size:0.78rem;">
                     <thead><tr style="background:var(--bg-main);"><th style="padding:6px;border:1px solid var(--border-light);">Fecha</th><th style="padding:6px;">Inicio</th><th style="padding:6px;">Fin</th><th style="padding:6px;">Cantidad</th><th style="padding:6px;">Justificación</th></tr></thead>
@@ -2121,7 +2147,7 @@ ${texto}</pre>
                 <div class="request-header">
                     <div>
                         <h4><i class="${TIPOS_SOLICITUD[req.tipo]?.icono || 'fas fa-file'}" style="margin-right:8px;color:${TIPOS_SOLICITUD[req.tipo]?.color || 'var(--primary)'};"></i>${req.tipoNombre}</h4>
-                        <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">Solicitado por: <strong>${req.solicitanteNombre}</strong> — ${DEPARTAMENTOS[req.departamento]?.nombre || ''}</p>
+                        <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">Solicitado por: <strong>${req.solicitanteNombre}</strong> — ${(App._depsMap[req.departamento] || DEPARTAMENTOS[req.departamento])?.nombre || ''}</p>
                     </div>
                     <span class="status-badge ${cardEst}"><i class="fas fa-${pendUi ? 'clock' : req.estado === 'aprobada' ? 'check-circle' : 'times-circle'}"></i> ${this.etiquetaEstadoSolicitud(req.estado)}</span>
                 </div>
@@ -2308,7 +2334,7 @@ ${texto}</pre>
         const datos = req.datos || {};
         const empresa = APP_CONFIG?.appName || 'La empresa';
         const nombre = req.solicitanteNombre || 'Empleado';
-        const dep = DEPARTAMENTOS[req.departamento]?.nombre || 'su departamento';
+        const dep = (App._depsMap[req.departamento] || DEPARTAMENTOS[req.departamento])?.nombre || 'su departamento';
         const fSolicitud = formatDate(req.fechaSolicitud);
         const motivo = datos.motivo || '______________________________';
         const fi = datos.fecha_inicio ? formatDate(datos.fecha_inicio) : '_____';
@@ -2549,7 +2575,7 @@ ${texto}</pre>
                             <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Departamento</th><th>Código Firma</th><th>Estado</th><th>Acciones</th></tr></thead>
                             <tbody>
                                 ${users.map(u => {
-                                    const dep = DEPARTAMENTOS[u.departamento];
+                                    const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
                                     const initials = (u.nombre[0] + u.apellido[0]).toUpperCase();
                                     const hasCode = u.codigoPersonal ? true : false;
                                     return `<tr>
@@ -2607,9 +2633,10 @@ ${texto}</pre>
         }
     }
 
-    static showCreateUserModal() {
+    static async showCreateUserModal() {
+        await this.ensureDepsLoaded();
         let depsOpts = '';
-        Object.keys(DEPARTAMENTOS).forEach(key => { depsOpts += `<option value="${key}">${DEPARTAMENTOS[key].nombre}</option>`; });
+        Object.keys(App._depsMap).forEach(key => { depsOpts += `<option value="${key}">${App._depsMap[key].nombre}</option>`; });
 
         this.showModal('Crear Nuevo Usuario', `
             <form onsubmit="App.handleCreateUser(event)">
@@ -2664,8 +2691,9 @@ ${texto}</pre>
         const user = await AuthManager.getUserById(userId);
         if (!user) return;
 
+        await this.ensureDepsLoaded();
         let depsOpts = '';
-        Object.keys(DEPARTAMENTOS).forEach(key => { depsOpts += `<option value="${key}" ${user.departamento === key ? 'selected' : ''}>${DEPARTAMENTOS[key].nombre}</option>`; });
+        Object.keys(App._depsMap).forEach(key => { depsOpts += `<option value="${key}" ${user.departamento === key ? 'selected' : ''}>${App._depsMap[key].nombre}</option>`; });
 
         this.showModal('Editar Usuario', `
             <form onsubmit="App.handleEditUser(event, '${userId}')">
