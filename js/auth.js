@@ -56,9 +56,41 @@ class AuthManager {
         });
     }
 
-    // Login con email y password
-    static async login(email, password) {
+    static getDefaultLoginDomain() {
+        // Dominio por defecto para login por usuario (se puede cambiar sin tocar lógica)
+        return 'vetsanmartin.com';
+    }
+
+    static buildEmailFromUsername(username) {
+        const cleanUser = String(username || '').trim().toLowerCase();
+        const storedDomain = localStorage.getItem('loginEmailDomain');
+        const defaultDomain = this.getDefaultLoginDomain();
+        const domain = String(storedDomain || defaultDomain).trim().toLowerCase();
+        return `${cleanUser}@${domain}`;
+    }
+
+    static async resolveLoginEmail(usernameOrEmail) {
+        const rawValue = String(usernameOrEmail || '').trim().toLowerCase();
+        if (!rawValue) {
+            return { success: false, message: 'Ingrese su usuario' };
+        }
+
+        if (rawValue.includes('@')) {
+            return { success: true, email: rawValue };
+        }
+
+        return { success: true, email: this.buildEmailFromUsername(rawValue) };
+    }
+
+    // Login con usuario (o correo) y password
+    static async login(usernameOrEmail, password) {
         try {
+            const emailResult = await this.resolveLoginEmail(usernameOrEmail);
+            if (!emailResult.success) {
+                return emailResult;
+            }
+
+            const email = emailResult.email;
             const result = await auth.signInWithEmailAndPassword(email, password);
             this.currentUser = result.user;
             await this.loadProfile(result.user.uid);
@@ -71,15 +103,21 @@ class AuthManager {
                 return { success: false, message: 'Su cuenta está desactivada. Contacte al administrador.' };
             }
 
+            const profileEmail = String(this.currentProfile.email || '').toLowerCase();
+            if (profileEmail.includes('@')) {
+                const domain = profileEmail.split('@')[1];
+                if (domain) localStorage.setItem('loginEmailDomain', domain);
+            }
+
             this.listenProfile(result.user.uid);
             return { success: true, user: this.currentProfile };
         } catch (error) {
             console.error('Error login:', error);
             let msg = 'Error al iniciar sesión';
             switch (error.code) {
-                case 'auth/user-not-found': msg = 'No existe una cuenta con ese correo'; break;
+                case 'auth/user-not-found': msg = 'No existe una cuenta con ese usuario'; break;
                 case 'auth/wrong-password': msg = 'Contraseña incorrecta'; break;
-                case 'auth/invalid-email': msg = 'Correo electrónico inválido'; break;
+                case 'auth/invalid-email': msg = 'Usuario o correo inválido'; break;
                 case 'auth/user-disabled': msg = 'Esta cuenta ha sido deshabilitada'; break;
                 case 'auth/too-many-requests': msg = 'Demasiados intentos. Intente más tarde'; break;
                 case 'auth/invalid-credential': msg = 'Credenciales incorrectas'; break;
@@ -272,13 +310,13 @@ class AuthManager {
         }
     }
 
-    // Desactivar usuario
+    // Eliminar perfil de usuario en RTDB
     static async deleteUser(uid) {
         try {
-            await dbRef.users.child(uid).update({ activo: false });
+            await dbRef.users.child(uid).remove();
             return { success: true };
         } catch (error) {
-            console.error('Error desactivando usuario:', error);
+            console.error('Error eliminando usuario:', error);
             return { success: false, message: error.message };
         }
     }

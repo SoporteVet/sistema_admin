@@ -114,7 +114,7 @@ class App {
 
     static async handleLogin(e) {
         e.preventDefault();
-        const email = document.getElementById('loginEmail').value;
+        const username = document.getElementById('loginUsername').value;
         const password = document.getElementById('loginPassword').value;
         const errorEl = document.getElementById('loginError');
         const loginBtn = document.querySelector('.login-btn');
@@ -122,7 +122,7 @@ class App {
         loginBtn.disabled = true;
         loginBtn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:8px;"></i> Ingresando...';
 
-        const result = await AuthManager.login(email, password);
+        const result = await AuthManager.login(username, password);
 
         loginBtn.disabled = false;
         loginBtn.innerHTML = '<i class="fas fa-sign-in-alt" style="margin-right:8px;"></i> Iniciar Sesión';
@@ -140,13 +140,14 @@ class App {
     static async handleLogout() {
         NotificationManager.stopListening();
         await AuthManager.logout();
-        document.getElementById('loginEmail').value = '';
+        document.getElementById('loginUsername').value = '';
         document.getElementById('loginPassword').value = '';
         this.showLogin();
     }
 
     static demoLogin(email, password) {
-        document.getElementById('loginEmail').value = email;
+        const username = String(email || '').includes('@') ? String(email).split('@')[0] : String(email || '');
+        document.getElementById('loginUsername').value = username;
         document.getElementById('loginPassword').value = password;
     }
 
@@ -1364,7 +1365,7 @@ class App {
             <div class="card">
                 <div class="card-header">
                     <h3><i class="fas fa-clipboard-list" style="margin-right:8px;color:var(--primary);"></i>Mis Solicitudes</h3>
-                    <button class="btn btn-primary btn-sm" onclick="App.navigate('nueva-solicitud')"><i class="fas fa-plus"></i> Nueva</button>
+                    <button class="btn btn-primary btn-sm" onclick="App.navigate('nueva-solicitud')">Nueva</button>
                 </div>
                 <div class="card-body">
                     <div class="tabs" id="reqTabs">
@@ -1384,7 +1385,7 @@ class App {
     static renderRequestList(requests) {
         if (requests.length === 0) {
             return `<div class="empty-state"><i class="fas fa-clipboard-list"></i><h3>No hay solicitudes</h3><p>Aún no has realizado ninguna solicitud</p>
-                <button class="btn btn-primary btn-sm" onclick="App.navigate('nueva-solicitud')"><i class="fas fa-plus"></i> Nueva</button></div>`;
+                <button class="btn btn-primary btn-sm" onclick="App.navigate('nueva-solicitud')">Nueva</button></div>`;
         }
 
         return requests.map(req => {
@@ -2541,6 +2542,7 @@ ${texto}</pre>
 
         try {
             const users = await AuthManager.getAllUsers();
+            await this.ensureDepsLoaded();
             console.log('Usuarios obtenidos:', users);
 
             if (!users || users.length === 0) {
@@ -2563,6 +2565,11 @@ ${texto}</pre>
                 return;
             }
 
+            let depFilterHtml = '<option value="">Todos los departamentos</option>';
+            Object.keys(App._depsMap).forEach(key => {
+                depFilterHtml += `<option value="${key}">${App._depsMap[key].nombre}</option>`;
+            });
+
             content.innerHTML = `
             <div class="card">
                 <div class="card-header">
@@ -2570,48 +2577,25 @@ ${texto}</pre>
                     <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus"></i> Nuevo Usuario</button>
                 </div>
                 <div class="card-body no-padding">
+                    <div class="filters-bar" style="padding:16px 16px 0 16px;">
+                        <div class="search-input">
+                            <i class="fas fa-search"></i>
+                            <input type="text" placeholder="Buscar usuario, correo, rol o departamento..." id="userSearchInput" oninput="App.filterUsers()">
+                        </div>
+                        <select class="filter-select" id="userDepFilter" onchange="App.filterUsers()">
+                            ${depFilterHtml}
+                        </select>
+                    </div>
                     <div class="table-container">
                         <table class="data-table">
                             <thead><tr><th>Usuario</th><th>Email</th><th>Rol</th><th>Departamento</th><th>Código Firma</th><th>Estado</th><th>Acciones</th></tr></thead>
-                            <tbody>
-                                ${users.map(u => {
-                                    const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
-                                    const initials = (u.nombre[0] + u.apellido[0]).toUpperCase();
-                                    const hasCode = u.codigoPersonal ? true : false;
-                                    return `<tr>
-                                        <td><div style="display:flex;align-items:center;gap:10px;">
-                                            <div class="user-avatar-sm" style="background:${dep?.color || 'var(--primary)'};">${initials}</div>
-                                            <div><strong>${u.nombre} ${u.apellido}</strong><br><small style="color:var(--text-light);">${u.id.substring(0,12)}...</small></div>
-                                        </div></td>
-                                        <td>${u.email}</td>
-                                        <td><span class="role-badge ${u.rol}">${ROLES[u.rol]?.nombre || u.rol}</span></td>
-                                        <td><span class="dep-chip" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-building'}"></i> ${dep?.nombre || 'N/A'}</span></td>
-                                        <td>
-                                            ${hasCode ? 
-                                                `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--success-light);color:var(--success);border-radius:4px;font-size:0.85rem;">
-                                                    <i class="fas fa-check-circle"></i> Configurado
-                                                </span>` : 
-                                                `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--warning-light);color:var(--warning);border-radius:4px;font-size:0.85rem;">
-                                                    <i class="fas fa-exclamation-circle"></i> Sin código
-                                                </span>`
-                                            }
-                                        </td>
-                                        <td><span class="status-badge ${u.activo ? 'aprobada' : 'rechazada'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
-                                        <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
-                                            <button class="btn btn-sm btn-outline" onclick="App.showEditUserModal('${u.id}')" title="Editar"><i class="fas fa-edit"></i></button>
-                                            <button class="btn btn-sm btn-outline" onclick="App.showManageCodeModal('${u.id}')" title="Gestionar código de firma" style="border-color:var(--primary);color:var(--primary);">
-                                                <i class="fas fa-key"></i>
-                                            </button>
-                                            ${u.id !== AuthManager.getUser().id ? `<button class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.handleDeleteUser('${u.id}')" title="Desactivar"><i class="fas fa-ban"></i></button>` : ''}
-                                        </div></td>
-                                    </tr>`;
-                                }).join('')}
-                            </tbody>
+                            <tbody id="usersTableBody">${this.renderUsersRows(users)}</tbody>
                         </table>
                     </div>
                 </div>
             </div>
         `;
+            this._cachedUsers = users;
         } catch (error) {
             console.error('Error renderizando usuarios:', error);
             content.innerHTML = `
@@ -2631,6 +2615,87 @@ ${texto}</pre>
                 </div>
             `;
         }
+    }
+
+    static _cachedUsers = [];
+
+    static renderUsersRows(users) {
+        if (!users || users.length === 0) {
+            return `
+                <tr>
+                    <td colspan="7" style="text-align:center;padding:24px;color:var(--text-secondary);">
+                        No se encontraron usuarios con los filtros seleccionados
+                    </td>
+                </tr>
+            `;
+        }
+
+        return users.map(u => {
+            const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
+            const initials = (u.nombre[0] + u.apellido[0]).toUpperCase();
+            const hasCode = u.codigoPersonal ? true : false;
+            return `<tr>
+                <td><div style="display:flex;align-items:center;gap:10px;">
+                    <div class="user-avatar-sm" style="background:${dep?.color || 'var(--primary)'};">${initials}</div>
+                    <div><strong>${u.nombre} ${u.apellido}</strong><br><small style="color:var(--text-light);">${u.id.substring(0,12)}...</small></div>
+                </div></td>
+                <td>${u.email}</td>
+                <td><span class="role-badge ${u.rol}">${ROLES[u.rol]?.nombre || u.rol}</span></td>
+                <td><span class="dep-chip" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-building'}"></i> ${dep?.nombre || 'N/A'}</span></td>
+                <td>
+                    ${hasCode ?
+                        `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--success-light);color:var(--success);border-radius:4px;font-size:0.85rem;">
+                            <i class="fas fa-check-circle"></i> Configurado
+                        </span>` :
+                        `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--warning-light);color:var(--warning);border-radius:4px;font-size:0.85rem;">
+                            <i class="fas fa-exclamation-circle"></i> Sin código
+                        </span>`
+                    }
+                </td>
+                <td><span class="status-badge ${u.activo ? 'aprobada' : 'rechazada'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
+                <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn btn-sm btn-outline" onclick="App.showEditUserModal('${u.id}')" title="Editar"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm btn-outline" onclick="App.showManageCodeModal('${u.id}')" title="Gestionar código de firma" style="border-color:var(--primary);color:var(--primary);">
+                        <i class="fas fa-key"></i>
+                    </button>
+                    ${u.id !== AuthManager.getUser().id ? `<button class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.handleDeleteUser('${u.id}')" title="Eliminar"><i class="fas fa-trash"></i></button>` : ''}
+                </div></td>
+            </tr>`;
+        }).join('');
+    }
+
+    static filterUsers() {
+        const searchInput = document.getElementById('userSearchInput');
+        const depSelect = document.getElementById('userDepFilter');
+        const tableBody = document.getElementById('usersTableBody');
+        if (!searchInput || !depSelect || !tableBody) return;
+
+        const query = searchInput.value.toLowerCase().trim();
+        const depFilter = depSelect.value;
+        let users = this._cachedUsers;
+
+        if (depFilter) {
+            users = users.filter(u => u.departamento === depFilter);
+        }
+
+        if (query) {
+            users = users.filter(u => {
+                const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
+                const fullName = `${u.nombre || ''} ${u.apellido || ''}`.toLowerCase();
+                const email = (u.email || '').toLowerCase();
+                const roleName = (ROLES[u.rol]?.nombre || u.rol || '').toLowerCase();
+                const depName = (dep?.nombre || '').toLowerCase();
+                const depCode = (dep?.codigo || u.departamento || '').toLowerCase();
+
+                return fullName.includes(query) ||
+                    email.includes(query) ||
+                    roleName.includes(query) ||
+                    depName.includes(query) ||
+                    depCode.includes(query);
+            });
+        }
+
+        tableBody.innerHTML = this.renderUsersRows(users);
     }
 
     static async showCreateUserModal() {
@@ -2737,19 +2802,24 @@ ${texto}</pre>
     }
 
     static handleDeleteUser(userId) {
-        this.showModal('Desactivar Usuario', `
-            <p style="margin-bottom:20px;">¿Está seguro de que desea <strong style="color:var(--danger);">desactivar</strong> este usuario?</p>
+        this.showModal('Eliminar Usuario', `
+            <p style="margin-bottom:20px;">¿Está seguro de que desea <strong style="color:var(--danger);">eliminar</strong> este usuario? Esta acción no se puede deshacer.</p>
             <div style="display:flex;gap:10px;justify-content:flex-end;">
                 <button class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
-                <button class="btn btn-danger" onclick="App.confirmDeleteUser('${userId}')"><i class="fas fa-ban"></i> Desactivar</button>
+                <button class="btn btn-danger" onclick="App.confirmDeleteUser('${userId}')"><i class="fas fa-trash"></i> Eliminar</button>
             </div>
         `);
     }
 
     static async confirmDeleteUser(userId) {
-        await AuthManager.deleteUser(userId);
+        const result = await AuthManager.deleteUser(userId);
+        if (!result.success) {
+            Toast.error('Error', result.message || 'No se pudo eliminar el usuario');
+            return;
+        }
+
         this.closeModal();
-        Toast.success('Desactivado', 'El usuario ha sido desactivado');
+        Toast.success('Usuario eliminado', 'El usuario ha sido eliminado correctamente');
         this.navigate('usuarios');
     }
 

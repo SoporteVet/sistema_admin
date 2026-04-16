@@ -1,29 +1,15 @@
 {
   "rules": {
     "users": {
-      // Los admins pueden leer todos los usuarios
       ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
       "$uid": {
-        // Todos los usuarios autenticados pueden leer su propio perfil
-        // Los admins pueden leer todos los perfiles
         ".read": "auth != null && ($uid === auth.uid || (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'))",
-        
-        // Solo admins pueden crear/actualizar usuarios
-        // Los usuarios pueden crear/actualizar solo su propio perfil (limitado)
-        // Permitir creación del primer usuario (setup inicial)
         ".write": "auth != null && (
-          // Admin puede crear/editar cualquier usuario
           (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
-          // Usuario puede crear su propio perfil (primera vez)
           ($uid === auth.uid && !data.exists()) ||
-          // Usuario puede editar su propio perfil (sin cambiar rol/departamento)
           ($uid === auth.uid && data.exists() && !newData.hasChild('rol') && !newData.hasChild('departamento')) ||
-          // Permitir creación del primer usuario durante setup (cuando no hay usuarios en la BD)
           (!data.exists() && !root.child('users').hasChildren())
         )",
-        
-        // Validaciones (más flexibles para creación inicial)
-        // Permitir actualizaciones parciales (solo si el usuario ya existe)
         ".validate": "!newData.exists() || data.exists() || newData.hasChildren(['nombre', 'apellido', 'email', 'rol', 'departamento', 'activo', 'fechaCreacion'])",
         "nombre": {
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
@@ -51,14 +37,10 @@
         }
       }
     },
-    
+
     "documents": {
-      // Permitir a usuarios autenticados listar documentos (el filtrado se hace en el código)
       ".read": "auth != null",
-      
       "$docId": {
-        // Todos los usuarios autenticados pueden leer documentos activos
-        // Los usuarios pueden leer documentos si están en firmas requeridas o si los crearon
         ".read": "auth != null && (
           data.child('estado').val() === 'activo' &&
           (
@@ -67,22 +49,16 @@
             data.child('creadoPor').val() === auth.uid
           )
         )",
-        
-        // Solo admins y encargados pueden crear documentos
-        // Solo el creador o admin puede actualizar
         ".write": "auth != null && (
           (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
           (
             root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
             (
               !data.exists() ||
-              data.child('creadoPor').val() === auth.uid ||
-              (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin')
+              data.child('creadoPor').val() === auth.uid
             )
           )
         )",
-        
-        // Validaciones
         ".validate": "newData.hasChildren(['codigo', 'departamento', 'categoria', 'subcategoria', 'titulo', 'contenido', 'creadoPor', 'fechaCreacion', 'estado', 'verificacionCode'])",
         "codigo": {
           ".validate": "newData.isString() && newData.val().length > 0"
@@ -98,7 +74,6 @@
         },
         "firmas": {
           "$firmaId": {
-            // Cualquier usuario autenticado puede agregar su propia firma
             ".write": "auth != null && (
               (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
               (newData.child('userId').val() === auth.uid && !data.exists())
@@ -111,15 +86,10 @@
         }
       }
     },
-    
+
     "requests": {
-      // Permitir a usuarios autenticados listar solicitudes (el filtrado se hace en el código)
       ".read": "auth != null",
-      
       "$reqId": {
-        // Los usuarios pueden leer sus propias solicitudes
-        // Los encargados y admins pueden leer solicitudes de su departamento
-        // Los admins pueden leer todas
         ".read": "auth != null && (
           (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
           data.child('solicitante').val() === auth.uid ||
@@ -129,29 +99,30 @@
             data.child('departamento').val() === root.child('users').child(auth.uid).child('departamento').val()
           )
         )",
-        
-        // Cualquier usuario autenticado puede crear solicitudes
-        // Solo encargados y admins pueden actualizar (aprobar/rechazar)
         ".write": "auth != null && (
           !data.exists() ||
           (
             (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
             (
               root.child('users').child(auth.uid).exists() &&
-              (root.child('users').child(auth.uid).child('rol').val() === 'encargado' || root.child('users').child(auth.uid).child('rol').val() === 'admin') &&
-              data.child('departamento').val() === root.child('users').child(auth.uid).child('departamento').val() &&
-              data.child('estado').val() === 'pendiente'
+              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+              (
+                (
+                  data.child('departamento').val() === root.child('users').child(auth.uid).child('departamento').val() &&
+                  data.child('estado').val() === 'pendiente'
+                ) ||
+                data.child('estado').val() === 'pendiente_ti' ||
+                data.child('estado').val() === 'pendiente_gerencia'
+              )
             )
           )
         )",
-        
-        // Validaciones
         ".validate": "newData.hasChildren(['tipo', 'tipoNombre', 'solicitante', 'solicitanteNombre', 'departamento', 'estado', 'fechaSolicitud'])",
         "tipo": {
           ".validate": "newData.isString() && newData.val().length > 0"
         },
         "estado": {
-          ".validate": "newData.isString() && (newData.val() === 'pendiente' || newData.val() === 'aprobada' || newData.val() === 'rechazada')"
+          ".validate": "newData.isString() && (newData.val() === 'pendiente' || newData.val() === 'pendiente_ti' || newData.val() === 'pendiente_gerencia' || newData.val() === 'aprobada' || newData.val() === 'rechazada')"
         },
         "solicitante": {
           ".validate": "newData.isString() && newData.val() === auth.uid"
@@ -161,17 +132,11 @@
         }
       }
     },
-    
+
     "notifications": {
-      // Permitir a usuarios autenticados listar notificaciones (el filtrado se hace en el código)
       ".read": "auth != null",
-      
       "$notifId": {
-        // Los usuarios solo pueden leer sus propias notificaciones
         ".read": "auth != null && data.child('destinatario').val() === auth.uid",
-        
-        // Solo el sistema (servidor) o admins pueden crear notificaciones
-        // Los usuarios pueden marcar como leída su propia notificación
         ".write": "auth != null && (
           (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
           (
@@ -180,8 +145,6 @@
             !newData.hasChild('destinatario')
           )
         )",
-        
-        // Validaciones
         ".validate": "newData.hasChildren(['tipo', 'titulo', 'mensaje', 'destinatario', 'fecha', 'leida'])",
         "destinatario": {
           ".validate": "newData.isString() && newData.val().length > 0"
@@ -194,23 +157,17 @@
         }
       }
     },
-    
+
     "counters": {
-      // Permitir inicialización del nodo raíz durante setup (cuando no existe)
-      // Solo admins/encargados pueden escribir después de la inicialización
+      ".read": "auth != null",
       ".write": "auth != null && (
-        // Permitir inicialización: nodo no existe (setup inicial)
         !data.exists() ||
-        // O si el usuario es admin/encargado
-        (root.child('users').child(auth.uid).exists() && 
+        (root.child('users').child(auth.uid).exists() &&
          (root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
           root.child('users').child(auth.uid).child('rol').val() === 'encargado'))
       )",
-      ".read": "auth != null",
-      
       "$departamento": {
         "$subcategoria": {
-          // Solo admins y encargados pueden leer/actualizar contadores específicos
           ".read": "auth != null && (
             (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
             (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'encargado')
@@ -223,20 +180,15 @@
         }
       }
     },
-    
+
     "departamentos": {
-      // Todos los usuarios autenticados pueden leer departamentos
       ".read": "auth != null",
-      
       "$depId": {
-        // Solo admins pueden crear/actualizar/eliminar departamentos
         ".write": "auth != null && (
-          root.child('users').child(auth.uid).exists() && 
+          root.child('users').child(auth.uid).exists() &&
           root.child('users').child(auth.uid).child('rol').val() === 'admin'
         )",
-        
-        // Validaciones
-        ".validate": "newData.hasChildren(['codigo', 'nombre', 'color', 'icono', 'categorias', 'fechaCreacion', 'activo'])",
+        ".validate": "newData.hasChildren(['codigo', 'nombre', 'color', 'icono', 'fechaCreacion', 'activo'])",
         "codigo": {
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
         },
@@ -250,7 +202,7 @@
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
         },
         "categorias": {
-          ".validate": "newData.hasChildren() || newData.val() === null"
+          ".validate": "!newData.exists() || newData.isString() || newData.hasChildren()"
         },
         "activo": {
           ".validate": "newData.isBoolean()"

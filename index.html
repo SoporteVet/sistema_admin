@@ -41,42 +41,46 @@
          LOGIN PAGE
          ============================================================ -->
     <div id="loginPage" class="login-page" style="display:none;">
-        <div class="login-container">
-            <div class="login-logo">
-                <div class="logo-icon">
-                    <i class="fas fa-paw"></i>
+        <video class="login-video" autoplay loop muted playsinline>
+            <source src="img/D_Cat_and_Dog_Login_Animation.mp4" type="video/mp4">
+        </video>
+
+        <div class="login-overlay-content">
+            <div class="login-brand-side">
+                <div class="login-brand-icon">
+                    <img src="img/empresa_marca_agua.jpg" alt="Logo VSMP">
                 </div>
-                <h1>Veterinaria San Martín de Porres</h1>
+                <h2>Veterinaria San Martín de Porres</h2>
                 <p>Sistema Administrativo Digital</p>
             </div>
 
-            <div class="login-error" id="loginError"></div>
-
-            <form class="login-form" onsubmit="App.handleLogin(event)">
-                <div class="form-group">
-                    <label>Correo Electrónico</label>
-                    <div class="input-wrapper">
-                        <i class="fas fa-envelope"></i>
-                        <input type="email" id="loginEmail" placeholder="correo@vsmp.com" required>
-                    </div>
+            <div class="login-container">
+                <div class="login-logo">
+                    <h1>Bienvenido</h1>
+                    <p>Inicia sesión para continuar</p>
                 </div>
-                <div class="form-group">
-                    <label>Contraseña</label>
-                    <div class="input-wrapper">
-                        <i class="fas fa-lock"></i>
-                        <input type="password" id="loginPassword" placeholder="••••••••" required>
-                    </div>
-                </div>
-                <button type="submit" class="login-btn">
-                    <i class="fas fa-sign-in-alt" style="margin-right:8px;"></i> Iniciar Sesión
-                </button>
-            </form>
 
-            <div class="login-demo">
-                <p>⚠️ Los usuarios se crean desde el panel de Administrador</p>
-                <p style="font-size:0.75rem;color:var(--text-light);margin-top:6px;">
-                    Para iniciar, cree un usuario admin con el script de inicialización
-                </p>
+                <div class="login-error" id="loginError"></div>
+
+                <form class="login-form" onsubmit="App.handleLogin(event)">
+                    <div class="form-group">
+                        <label>Usuario</label>
+                        <div class="input-wrapper">
+                            <i class="fas fa-user"></i>
+                            <input type="text" id="loginUsername" placeholder="usuario" required autocomplete="username">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Contraseña</label>
+                        <div class="input-wrapper">
+                            <i class="fas fa-lock"></i>
+                            <input type="password" id="loginPassword" placeholder="••••••••" required>
+                        </div>
+                    </div>
+                    <button type="submit" class="login-btn">
+                        <i class="fas fa-sign-in-alt" style="margin-right:8px;"></i> Iniciar Sesión
+                    </button>
+                </form>
             </div>
         </div>
     </div>
@@ -90,7 +94,7 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo-icon">
-                    <i class="fas fa-paw"></i>
+                    <img src="img/empresa_marca_agua.jpg" alt="Logo VSMP">
                 </div>
                 <div class="logo-text">
                     <h2>VSMP</h2>
@@ -255,7 +259,7 @@
          ============================================================ -->
     <script src="js/firebase-config.js?v=20260319"></script>
     <script src="js/data.js?v=20260325"></script>
-    <script src="js/auth.js?v=20260325"></script>
+    <script src="js/auth.js?v=20260416a"></script>
     <script src="js/notifications.js?v=20260319"></script>
     <script src="js/documents.js?v=20260319"></script>
     <script src="js/requests.js?v=20260325"></script>
