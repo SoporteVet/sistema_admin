@@ -443,8 +443,12 @@ class App {
                         <div class="form-row">
                             <div class="form-group">
                                 <label>Para <span class="required">*</span></label>
-                                <input type="text" class="form-control" id="docPara" placeholder="Ej: Personal de Administración..." required>
-                                <small style="color:var(--text-light);margin-top:4px;display:block;">Este texto aparecerá en el PDF del documento</small>
+                                <select class="form-control" id="docPara" onchange="App.updateFirmantes()" required>
+                                    <option value="">Seleccionar destinatario...</option>
+                                    <option value="TODOS">Todos los empleados</option>
+                                    ${depsHtml}
+                                </select>
+                                <small style="color:var(--text-light);margin-top:4px;display:block;">Seleccione el departamento destinatario; esto filtrará los firmantes requeridos.</small>
                             </div>
                             <div class="form-group">
                                 <label>De <span class="required">*</span></label>
@@ -572,16 +576,27 @@ class App {
 
     static async updateFirmantes() {
         const container = document.getElementById('firmantesContainer');
+        const paraSelect = document.getElementById('docPara');
         if (!container) return;
         
         container.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cargando firmantes...';
 
         const users = await AuthManager.getAllUsers();
         const currentUser = AuthManager.getUser();
-        const available = users.filter(u => u.activo && u.id !== currentUser.id);
+        const paraValue = paraSelect?.value || '';
+
+        const baseAvailable = users.filter(u => u.activo && u.id !== currentUser.id);
+        let available = baseAvailable;
+
+        if (paraValue === 'TODOS') {
+            // Si "Para" es TODOS, mostrar todos los empleados como firmantes requeridos.
+            available = baseAvailable.filter(u => u.rol === 'empleado');
+        } else if (paraValue) {
+            available = baseAvailable.filter(u => u.departamento === paraValue);
+        }
 
         if (available.length === 0) {
-            container.innerHTML = '<p class="form-help">No hay usuarios disponibles para firmar</p>';
+            container.innerHTML = '<p class="form-help">No hay usuarios disponibles para firmar con el destinatario seleccionado</p>';
             return;
         }
 
@@ -2366,7 +2381,7 @@ ${texto}</pre>
                 const ced = datos.cedula || '_____';
                 const puesto = datos.puesto || '_____';
                 const fechaIngreso = datos.fecha_ingreso ? formatDate(datos.fecha_ingreso) : '_____';
-                return `SOLICITUD DE DISFRUTE DE VACACIONES\n\n1. DATOS DEL COLABORADOR\n\nYo, ${nombre}, número de cédula ${ced}, con el puesto de ${puesto}, del departamento / área de ${dep}, con fecha de ingreso a la empresa ${fechaIngreso}.\n\n2. PERIODO DE VACACIONES SOLICITADO\nDe conformidad con lo establecido en el artículo 153 del Código de Trabajo de Costa Rica, solicito el disfrute de mis vacaciones anuales correspondientes al período laborado, en la cantidad de ${dias} hábiles, siendo mi último día que labora el ${ultimoDiaLabora}, con fecha de inicio ${fi}, fecha de finalización ${ff} y fecha de reincorporación laboral ${fechaReincorporacion}.${obs}\n\n3. DECLARACIÓN DEL COLABORADOR\n\nDeclaro que he sido informado(a) de mis derechos y deberes en relación con el disfrute de vacaciones, conforme al Código de Trabajo de Costa Rica, y que el presente período ha sido coordinado con la empresa para no afectar la continuidad del servicio.\n\n4. AUTORIZACIÓN DEL PATRONO / REPRESENTANTE LEGAL\n\nHago constar que el período de vacaciones solicitado ha sido revisado y aprobado, cumpliendo con la normativa laboral vigente, y que durante dicho período el colaborador conservará todos sus derechos laborales.`;
+                return `SOLICITUD DE DISFRUTE DE VACACIONES\n\n1. DATOS DEL COLABORADOR\n\nYo, ${nombre}, número de cédula ${ced}, con el puesto de ${puesto}, del departamento / área de ${dep}, con fecha de ingreso a la empresa ${fechaIngreso}.\n\n2. PERIODO DE VACACIONES SOLICITADO\nDe conformidad con lo establecido en el artículo 153 del Código de Trabajo de Costa Rica, solicito el disfrute de mis vacaciones anuales correspondientes al período laborado, en la cantidad de ${dias} naturales, siendo mi último día que labora el ${ultimoDiaLabora}, con fecha de inicio ${fi}, fecha de finalización ${ff} y fecha de reincorporación laboral ${fechaReincorporacion}.${obs}\n\n3. DECLARACIÓN DEL COLABORADOR\n\nDeclaro que he sido informado(a) de mis derechos y deberes en relación con el disfrute de vacaciones, conforme al Código de Trabajo de Costa Rica, y que el presente período ha sido coordinado con la empresa para no afectar la continuidad del servicio.\n\n4. AUTORIZACIÓN DEL PATRONO / REPRESENTANTE LEGAL\n\nHago constar que el período de vacaciones solicitado ha sido revisado y aprobado, cumpliendo con la normativa laboral vigente, y que durante dicho período el colaborador conservará todos sus derechos laborales.`;
             }
 
             case 'ingreso_posterior': {
