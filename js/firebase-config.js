@@ -32,7 +32,9 @@ const dbRef = {
     requests: db.ref('requests'),
     notifications: db.ref('notifications'),
     counters: db.ref('counters'),
-    departamentos: db.ref('departamentos')
+    departamentos: db.ref('departamentos'),
+    sanctionFollowups: db.ref('sanctionFollowups'),
+    sanctionFollowupsIndex: db.ref('sanctionFollowupsIndex')
 };
 
 console.log('🔥 Firebase inicializado correctamente');

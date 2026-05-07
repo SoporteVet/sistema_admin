@@ -74,7 +74,7 @@ class PDFGenerator {
         let yPos = 70;
         pdf.setFontSize(16);
         pdf.setFont(undefined, 'normal');
-        pdf.text(`Para: ${doc.para || this.getRecipientsText(doc)}`, margin, yPos);
+        pdf.text(`Para: ${this.formatParaField(doc)}`, margin, yPos);
         yPos += 7;
         pdf.text(`De: ${doc.de || doc.creadoPorNombre}`, margin, yPos);
         yPos += 7;
@@ -137,7 +137,7 @@ class PDFGenerator {
         let yPos = 70;
         pdf.setFontSize(16);
         pdf.setFont(undefined, 'normal');
-        pdf.text(`Para: ${doc.para || this.getRecipientsText(doc)}`, margin, yPos);
+        pdf.text(`Para: ${this.formatParaField(doc)}`, margin, yPos);
         yPos += 7;
         pdf.text(`De: ${doc.de || doc.creadoPorNombre}`, margin, yPos);
         yPos += 7;
@@ -708,7 +708,7 @@ class PDFGenerator {
 
                 <!-- PARA/DE/ASUNTO -->
                 <div style="margin-bottom: 25px; font-size: 16px; line-height: 1.5; font-family: Arial, sans-serif;">
-                    <div style="margin: 0; padding: 0; font-size: 16px; line-height: 1.5; font-weight: normal; font-family: Arial, sans-serif;"><strong>Para:</strong> ${doc.para || this.getRecipientsText(doc)}</div>
+                    <div style="margin: 0; padding: 0; font-size: 16px; line-height: 1.5; font-weight: normal; font-family: Arial, sans-serif;"><strong>Para:</strong> ${this.formatParaField(doc)}</div>
                     <div style="margin: 0; padding: 0; font-size: 16px; line-height: 1.5; font-weight: normal; font-family: Arial, sans-serif;"><strong>De:</strong> ${doc.de || doc.creadoPorNombre}</div>
                     <div style="margin: 0; padding: 0; font-size: 16px; line-height: 1.5; font-weight: normal; font-family: Arial, sans-serif;"><strong>Asunto:</strong> ${doc.asunto || doc.titulo}</div>
                 </div>
@@ -879,6 +879,19 @@ class PDFGenerator {
         }
         const dep = DEPARTAMENTOS[doc.departamento];
         return dep ? `Personal de ${dep.nombre}` : 'Personal';
+    }
+
+    /** Texto legible para campo "Para" en PDF/HTML (incluye códigos especiales) */
+    static formatParaField(doc) {
+        const p = doc && doc.para;
+        if (!p) return this.getRecipientsText(doc);
+        if (typeof DOC_PARA_ENCARGADO_TODAS_AREAS !== 'undefined' && p === DOC_PARA_ENCARGADO_TODAS_AREAS) {
+            return 'Empleados de todas las áreas que gestiono como encargado';
+        }
+        if (p === 'TODOS') return 'Todos los empleados';
+        const dep = DEPARTAMENTOS[p] || (typeof App !== 'undefined' && App._depsMap && App._depsMap[p]);
+        if (dep && dep.nombre) return dep.nombre;
+        return p;
     }
 
     // Limpiar HTML y convertir a texto plano

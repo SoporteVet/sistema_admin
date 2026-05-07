@@ -16,6 +16,9 @@ const SOLICITUD_HORAS_EXTRA_CONFIG = {
     tipo: 'horas_extraordinarias'
 };
 
+/** Valor guardado en doc.para: firmantes = empleados de todos los deptos que el encargado gestiona */
+const DOC_PARA_ENCARGADO_TODAS_AREAS = '__ENC_MIS_AREAS__';
+
 // ============================================================
 // DEPARTAMENTOS Y TIPOS DE DOCUMENTOS
 // ============================================================

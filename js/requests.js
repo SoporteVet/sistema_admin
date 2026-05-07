@@ -26,20 +26,20 @@ class RequestManager {
         // Etapa 1: Encargado de Área (del departamento del solicitante)
         if (req.estado === 'pendiente') {
             if (user.rol === 'admin') return true; // fallback: admin puede firmar si no hay encargado
-            return user.rol === 'encargado' && user.departamento === req.departamento;
+            return user.rol === 'encargado' && AuthManager.encargadoGestionaDepartamento(user, req.departamento);
         }
 
         // Etapa 2 (solo horas extra): Departamento de TI
         if (req.estado === 'pendiente_ti') {
             if (!esHe) return false;
             if (user.rol === 'admin') return true;
-            return user.rol === 'encargado' && user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI;
+            return user.rol === 'encargado' && AuthManager.encargadoGestionaDepartamento(user, SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI);
         }
 
         // Etapa final: Gerencia General (admin)
         if (req.estado === 'pendiente_gerencia') {
             if (user.rol === 'admin') return true;
-            return user.rol === 'encargado' && user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia;
+            return user.rol === 'encargado' && AuthManager.encargadoGestionaDepartamento(user, SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia);
         }
 
         return false;

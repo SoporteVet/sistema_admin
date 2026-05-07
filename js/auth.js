@@ -110,7 +110,8 @@ class AuthManager {
             }
 
             this.listenProfile(result.user.uid);
-            return { success: true, user: this.currentProfile };
+            const requirePasswordChange = Boolean(this.currentProfile.debeCambiarPassword);
+            return { success: true, user: this.currentProfile, requirePasswordChange };
         } catch (error) {
             console.error('Error login:', error);
             let msg = 'Error al iniciar sesión';
@@ -164,6 +165,32 @@ class AuthManager {
 
     static getUserDepartment() {
         return this.currentProfile ? this.currentProfile.departamento : null;
+    }
+
+    /**
+     * Departamentos donde el usuario actúa como encargado de área (códigos únicos).
+     * Incluye siempre el campo `departamento` principal si no estaba en el mapa.
+     */
+    static getDepartamentosEncargado(user) {
+        if (!user) return [];
+        const raw = user.departamentosEncargado;
+        let ids = [];
+        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+            ids = Object.keys(raw).filter(k => raw[k]);
+        }
+        if (user.departamento && !ids.includes(user.departamento)) {
+            ids.push(user.departamento);
+        }
+        if (ids.length === 0 && user.departamento) {
+            ids = [user.departamento];
+        }
+        return [...new Set(ids)];
+    }
+
+    /** Solo rol encargado: ¿puede gestionar solicitudes/documents de ese departamento? */
+    static encargadoGestionaDepartamento(user, depId) {
+        if (!user || !depId || user.rol !== 'encargado') return false;
+        return this.getDepartamentosEncargado(user).includes(depId);
     }
 
     // ========================================================
@@ -249,11 +276,15 @@ class AuthManager {
                 rol: userData.rol,
                 departamento: userData.departamento,
                 activo: true,
+                debeCambiarPassword: true,
                 fechaCreacion: new Date().toISOString()
             };
             if (userData.cedula) profile.cedula = String(userData.cedula).trim();
             if (userData.puesto) profile.puesto = String(userData.puesto).trim();
             if (userData.fechaIngreso) profile.fechaIngreso = String(userData.fechaIngreso).trim();
+            if (userData.rol === 'encargado' && userData.departamentosEncargado && typeof userData.departamentosEncargado === 'object') {
+                profile.departamentosEncargado = userData.departamentosEncargado;
+            }
 
             await dbRef.users.child(newUid).set(profile);
 
@@ -278,6 +309,7 @@ class AuthManager {
             if (updates.cedula !== undefined) cleanUpdates.cedula = updates.cedula;
             if (updates.puesto !== undefined) cleanUpdates.puesto = updates.puesto;
             if (updates.fechaIngreso !== undefined) cleanUpdates.fechaIngreso = updates.fechaIngreso;
+            if (updates.departamentosEncargado !== undefined) cleanUpdates.departamentosEncargado = updates.departamentosEncargado;
 
             await dbRef.users.child(uid).update(cleanUpdates);
 
@@ -310,6 +342,64 @@ class AuthManager {
         }
     }
 
+    // Actualizar contraseña del usuario autenticado
+    static async changeCurrentPassword(currentPassword, newPassword) {
+        try {
+            const authUser = auth.currentUser;
+            if (!authUser || !authUser.email) {
+                return { success: false, message: 'No hay una sesión activa para cambiar la contraseña' };
+            }
+
+            const credential = firebase.auth.EmailAuthProvider.credential(authUser.email, currentPassword);
+            await authUser.reauthenticateWithCredential(credential);
+            await authUser.updatePassword(newPassword);
+            await dbRef.users.child(authUser.uid).update({
+                debeCambiarPassword: false,
+                fechaCambioPassword: new Date().toISOString()
+            });
+            await this.loadProfile(authUser.uid);
+            return { success: true };
+        } catch (error) {
+            console.error('Error cambiando contraseña:', error);
+            let msg = 'No se pudo cambiar la contraseña';
+            switch (error.code) {
+                case 'auth/wrong-password': msg = 'La contraseña actual es incorrecta'; break;
+                case 'auth/weak-password': msg = 'La nueva contraseña debe tener al menos 6 caracteres'; break;
+                case 'auth/requires-recent-login': msg = 'Por seguridad, vuelva a iniciar sesión e intente de nuevo'; break;
+            }
+            return { success: false, message: msg };
+        }
+    }
+
+    // Marcar que un usuario debe cambiar su contraseña al volver a iniciar sesión
+    static async markUserMustChangePassword(uid, mustChange = true) {
+        try {
+            await dbRef.users.child(uid).update({
+                debeCambiarPassword: Boolean(mustChange)
+            });
+            return { success: true };
+        } catch (error) {
+            console.error('Error marcando cambio obligatorio de contraseña:', error);
+            return { success: false, message: 'No se pudo actualizar la política de contraseña' };
+        }
+    }
+
+    // Enviar correo de restablecimiento de contraseña
+    static async sendPasswordReset(email) {
+        try {
+            await auth.sendPasswordResetEmail(email);
+            return { success: true };
+        } catch (error) {
+            console.error('Error enviando restablecimiento:', error);
+            let msg = 'No se pudo enviar el correo de restablecimiento';
+            switch (error.code) {
+                case 'auth/invalid-email': msg = 'El correo del usuario es inválido'; break;
+                case 'auth/user-not-found': msg = 'No existe una cuenta con ese correo'; break;
+            }
+            return { success: false, message: msg };
+        }
+    }
+
     // Eliminar perfil de usuario en RTDB
     static async deleteUser(uid) {
         try {
@@ -337,9 +427,9 @@ class AuthManager {
         try {
             const users = await this.getAllUsers();
             return users.filter(u =>
-                u.departamento === depId &&
+                u.activo &&
                 (u.rol === 'encargado' || u.rol === 'admin') &&
-                u.activo
+                (u.departamento === depId || (u.departamentosEncargado && u.departamentosEncargado[depId]))
             );
         } catch (error) {
             console.error('Error:', error);

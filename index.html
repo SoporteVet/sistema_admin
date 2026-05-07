@@ -145,6 +145,15 @@
                         <span>Gestionar Solicitudes</span>
                         <span class="badge" id="navNotifBadge" style="display:none;"></span>
                     </div>
+                    <div class="nav-item" data-view="seguimiento-sanciones" data-role="admin,encargado" onclick="App.navigate('seguimiento-sanciones')">
+                        <i class="fas fa-gavel"></i>
+                        <span>Sanciones / Quejas</span>
+                    </div>
+                    <div class="nav-item" data-view="seguimiento-compartidos" onclick="App.navigate('seguimiento-compartidos')" id="navSeguimientoCompartidos" style="display:none;">
+                        <i class="fas fa-user-shield"></i>
+                        <span>Seguimientos compartidos</span>
+                        <span class="badge" id="navSanctionSharedBadge" style="display:none;"></span>
+                    </div>
                 </div>
 
                 <!-- ADMINISTRACIÓN -->
@@ -262,14 +271,15 @@
          APP SCRIPTS
          ============================================================ -->
     <script src="js/firebase-config.js?v=20260319"></script>
-    <script src="js/data.js?v=20260325"></script>
-    <script src="js/auth.js?v=20260416a"></script>
+    <script src="js/data.js?v=20260507c"></script>
+    <script src="js/auth.js?v=20260507b"></script>
     <script src="js/notifications.js?v=20260319"></script>
     <script src="js/documents.js?v=20260319"></script>
-    <script src="js/requests.js?v=20260417b"></script>
+    <script src="js/requests.js?v=20260507b"></script>
+    <script src="js/sanctions-followup.js?v=20260507"></script>
     <script src="js/departamentos.js?v=20260416f"></script>
-    <script src="js/pdf-generator.js?v=20260417c"></script>
-    <script src="js/app.js?v=20260417b"></script>
+    <script src="js/pdf-generator.js?v=20260507c"></script>
+    <script src="js/app.js?v=20260507c"></script>
 
 </body>
 </html>

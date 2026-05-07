@@ -6,6 +6,9 @@
 class App {
     static currentView = 'dashboard';
     static isLoading = false;
+    static _forcePasswordModal = false;
+    /** Origen del detalle de ticket de sanciones: 'manager' | 'shared' */
+    static _sanctionDetalleSource = 'manager';
 
     // Cache de departamentos fusionado (DEPARTAMENTOS estático + Firebase)
     static _depsMap = { ...DEPARTAMENTOS };
@@ -107,6 +110,7 @@ class App {
         document.getElementById('loadingScreen').style.display = 'none';
         this.updateSidebar();
         this.setupRealtimeNotifications();
+        this.refreshSanctionSharedNavItem();
         this._depsLoaded = false;
         this.ensureDepsLoaded();
         this.navigate('dashboard');
@@ -131,6 +135,9 @@ class App {
             errorEl.classList.remove('show');
             this.showApp();
             Toast.success('Bienvenido', `Hola, ${result.user.nombre}!`);
+            if (result.requirePasswordChange) {
+                this.showChangePasswordModal(true);
+            }
         } else {
             errorEl.textContent = result.message;
             errorEl.classList.add('show');
@@ -204,6 +211,9 @@ class App {
                 case 'estado-firmas': await this.renderEstadoFirmas(params.id); break;
                 case 'usuarios': await this.renderUsuarios(); break;
                 case 'departamentos': await this.renderDepartamentos(); break;
+                case 'seguimiento-sanciones': await this.renderSeguimientoSanciones(); break;
+                case 'seguimiento-compartidos': await this.renderSeguimientoCompartidos(); break;
+                case 'seguimiento-sanciones-detalle': await this.renderSeguimientoSancionesDetalle(params.id); break;
                 default: await this.renderDashboard();
             }
             contentArea.className = 'content-area fade-in';
@@ -221,8 +231,12 @@ class App {
     }
 
     static updateActiveNav(view) {
+        let navView = view;
+        if (view === 'seguimiento-sanciones-detalle') {
+            navView = App._sanctionDetalleSource === 'shared' ? 'seguimiento-compartidos' : 'seguimiento-sanciones';
+        }
         document.querySelectorAll('.nav-item').forEach(item => {
-            item.classList.toggle('active', item.dataset.view === view);
+            item.classList.toggle('active', item.dataset.view === navView);
         });
     }
 
@@ -237,7 +251,10 @@ class App {
             'gestionar-solicitudes': { title: 'Gestionar Solicitudes', desc: 'Aprobar o rechazar solicitudes' },
             'estado-firmas': { title: 'Estado de Firmas', desc: 'Ver quién ha firmado y quién no' },
             'usuarios': { title: 'Usuarios', desc: 'Administración de usuarios' },
-            'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' }
+            'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' },
+            'seguimiento-sanciones': { title: 'Seguimiento de sanciones o quejas', desc: 'Tickets internos — en espera o terminado' },
+            'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
+            'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto y estado del ticket' }
         };
         const info = titles[view] || titles['dashboard'];
         document.getElementById('pageTitle').textContent = info.title;
@@ -257,10 +274,35 @@ class App {
         document.getElementById('sidebarUserRole').textContent = ROLES[user.rol]?.nombre || user.rol;
 
         document.querySelectorAll('.nav-item[data-role]').forEach(item => {
+            if (item.id === 'navSeguimientoCompartidos') return;
             const roles = item.dataset.role.split(',');
             const show = roles.includes(user.rol) || roles.includes('all') || user.rol === 'admin';
             item.style.display = show ? 'flex' : 'none';
         });
+        this.refreshSanctionSharedNavItem();
+    }
+
+    static async refreshSanctionSharedNavItem() {
+        const nav = document.getElementById('navSeguimientoCompartidos');
+        const badge = document.getElementById('navSanctionSharedBadge');
+        if (!nav || typeof SanctionFollowupManager === 'undefined') return;
+        try {
+            const list = await SanctionFollowupManager.listSharedWithMe();
+            const pend = list.filter(t => t.estado === SanctionFollowupManager.ESTADO_ESPERA).length;
+            if (list.length > 0) {
+                nav.style.display = 'flex';
+                if (badge) {
+                    badge.textContent = pend > 0 ? String(pend) : '';
+                    badge.style.display = pend > 0 ? 'inline' : 'none';
+                }
+            } else {
+                nav.style.display = 'none';
+                if (badge) badge.style.display = 'none';
+            }
+        } catch (e) {
+            nav.style.display = 'none';
+            if (badge) badge.style.display = 'none';
+        }
     }
 
     static toggleSidebar() {
@@ -272,13 +314,24 @@ class App {
     // ========================================================
     static async renderDashboard() {
         const user = AuthManager.getUser();
-        const [docStats, reqStats, myDocs, pendingReqs] = await Promise.all([
+        const managedDeps = AuthManager.getDepartamentosEncargado(user);
+        const myDocsNested = await Promise.all(managedDeps.map(d => DocumentManager.getByDepartment(d)));
+        const myDocsMerged = new Map();
+        myDocsNested.flat().forEach(d => myDocsMerged.set(d.id, d));
+        const myDocs = Array.from(myDocsMerged.values());
+        const deptStatLabel = (AuthManager.isEncargado() && managedDeps.length > 1)
+            ? 'Docs. Mis áreas'
+            : 'Docs. Mi Departamento';
+
+        const [docStats, reqStats, pendingReqs, sharedSanctions] = await Promise.all([
             DocumentManager.getStats(),
             RequestManager.getStats(),
-            DocumentManager.getByDepartment(user.departamento),
             AuthManager.isEncargado()
                 ? RequestManager.getPendingActionsForUser(user)
-                : RequestManager.getByUser(user.id).then(reqs => reqs.filter(r => RequestManager.isEstadoPendienteEmpleado(r.estado)))
+                : RequestManager.getByUser(user.id).then(reqs => reqs.filter(r => RequestManager.isEstadoPendienteEmpleado(r.estado))),
+            typeof SanctionFollowupManager !== 'undefined'
+                ? SanctionFollowupManager.listSharedWithMe()
+                : Promise.resolve([])
         ]);
 
         const content = document.getElementById('contentArea');
@@ -295,7 +348,7 @@ class App {
                     <div class="stat-icon" style="background: var(--gradient-secondary);"><i class="fas fa-building"></i></div>
                     <div class="stat-info">
                         <h3>${myDocs.filter(d => d.estado === 'activo').length}</h3>
-                        <p>Docs. Mi Departamento</p>
+                        <p>${deptStatLabel}</p>
                     </div>
                 </div>
                 <div class="stat-card">
@@ -380,6 +433,30 @@ class App {
                         `}
                     </div>
                 </div>
+
+                ${sharedSanctions && sharedSanctions.length > 0 ? `
+                <div class="card" style="grid-column: 1 / -1;">
+                    <div class="card-header">
+                        <h3><i class="fas fa-user-shield" style="margin-right:8px;color:var(--primary);"></i>Seguimientos compartidos con usted</h3>
+                        <button class="btn btn-sm btn-outline" onclick="App.navigate('seguimiento-compartidos')">Ver todos</button>
+                    </div>
+                    <div class="card-body no-padding">
+                        <div style="padding:12px;">
+                            ${sharedSanctions.slice(0, 5).map(t => {
+                                const pend = t.estado === SanctionFollowupManager.ESTADO_ESPERA;
+                                return `
+                                <div class="request-card ${pend ? 'status-pendiente' : ''}" style="cursor:pointer;margin-bottom:8px;" onclick="App.openSanctionDetalle('${t.id}','shared')">
+                                    <div class="request-header">
+                                        <h4>${App.escapeHtml(t.titulo || 'Sin título')}</h4>
+                                        <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(t.estado)}</span>
+                                    </div>
+                                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:6px;">Por ${App.escapeHtml(t.creadoPorNombre || '')} · ${formatDateTime(t.fechaCreacion)}</p>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
             </div>
         `;
     }
@@ -394,15 +471,30 @@ class App {
         await this.ensureDepsLoaded();
 
         let depsHtml = '';
+        let depsParaHtml = '';
         if (AuthManager.isAdmin()) {
             Object.keys(App._depsMap).forEach(key => {
                 const dep = App._depsMap[key];
                 depsHtml += `<option value="${key}">${dep.nombre} (${dep.codigo || key})</option>`;
+                depsParaHtml += `<option value="${key}">${dep.nombre}</option>`;
             });
+        } else if (AuthManager.isEncargado()) {
+            const codes = AuthManager.getDepartamentosEncargado(user);
+            codes.forEach(key => {
+                const dep = App._depsMap[key];
+                if (dep) {
+                    depsHtml += `<option value="${key}">${dep.nombre} (${dep.codigo || key})</option>`;
+                    depsParaHtml += `<option value="${key}">${dep.nombre}</option>`;
+                }
+            });
+            if (codes.length >= 2 && typeof DOC_PARA_ENCARGADO_TODAS_AREAS !== 'undefined') {
+                depsParaHtml += `<option value="${DOC_PARA_ENCARGADO_TODAS_AREAS}">Empleados de todas mis áreas (recepción, consulta, etc.)</option>`;
+            }
         } else {
             const dep = App._depsMap[user.departamento];
             if (dep) {
                 depsHtml = `<option value="${user.departamento}">${dep.nombre} (${dep.codigo || user.departamento})</option>`;
+                depsParaHtml = `<option value="${user.departamento}">${dep.nombre}</option>`;
             }
         }
 
@@ -446,9 +538,9 @@ class App {
                                 <select class="form-control" id="docPara" onchange="App.updateFirmantes()" required>
                                     <option value="">Seleccionar destinatario...</option>
                                     <option value="TODOS">Todos los empleados</option>
-                                    ${depsHtml}
+                                    ${depsParaHtml}
                                 </select>
-                                <small style="color:var(--text-light);margin-top:4px;display:block;">Seleccione el departamento destinatario; esto filtrará los firmantes requeridos.</small>
+                                <small style="color:var(--text-light);margin-top:4px;display:block;">${AuthManager.isEncargado() ? 'Elija un departamento o “todas mis áreas” para listar empleados y sus permisos de firma.' : 'Seleccione el departamento destinatario; esto filtrará los firmantes requeridos.'}</small>
                             </div>
                             <div class="form-group">
                                 <label>De <span class="required">*</span></label>
@@ -591,6 +683,9 @@ class App {
         if (paraValue === 'TODOS') {
             // Si "Para" es TODOS, mostrar todos los empleados como firmantes requeridos.
             available = baseAvailable.filter(u => u.rol === 'empleado');
+        } else if (typeof DOC_PARA_ENCARGADO_TODAS_AREAS !== 'undefined' && paraValue === DOC_PARA_ENCARGADO_TODAS_AREAS) {
+            const deps = AuthManager.getDepartamentosEncargado(currentUser);
+            available = baseAvailable.filter(u => deps.includes(u.departamento));
         } else if (paraValue) {
             available = baseAvailable.filter(u => u.departamento === paraValue);
         }
@@ -2168,18 +2263,22 @@ class App {
         if (AuthManager.isAdmin()) {
             requests = await RequestManager.getAll();
         } else {
-            const byDep = await RequestManager.getByDepartment(user.departamento);
             const all = await RequestManager.getAll();
+            const managed = AuthManager.getDepartamentosEncargado(user);
+            const byManaged = new Map();
+            for (const depId of managed) {
+                const part = await RequestManager.getByDepartment(depId);
+                part.forEach(r => byManaged.set(r.id, r));
+            }
             const extra = [];
-            if (user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI) {
+            if (AuthManager.encargadoGestionaDepartamento(user, SOLICITUD_HORAS_EXTRA_CONFIG.deptoTI)) {
                 extra.push(...all.filter(r => r.tipo === 'horas_extraordinarias' && r.estado === 'pendiente_ti'));
             }
-            if (user.departamento === SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia) {
-                // La Gerencia General recibe todas las solicitudes que estén en la etapa de gerencia
+            if (AuthManager.encargadoGestionaDepartamento(user, SOLICITUD_HORAS_EXTRA_CONFIG.deptoGerencia)) {
                 extra.push(...all.filter(r => r.estado === 'pendiente_gerencia'));
             }
             const map = new Map();
-            [...byDep, ...extra].forEach(r => map.set(r.id, r));
+            [...byManaged.values(), ...extra].forEach(r => map.set(r.id, r));
             requests = Array.from(map.values());
         }
         requests = requests.sort((a, b) => new Date(b.fechaSolicitud) - new Date(a.fechaSolicitud));
@@ -2731,6 +2830,337 @@ ${texto}</pre>
     }
 
     // ========================================================
+    // SEGUIMIENTO DE SANCIONES / QUEJAS
+    // ========================================================
+    static _cachedSanctionTickets = [];
+
+    static openSanctionDetalle(id, source) {
+        App._sanctionDetalleSource = source === 'shared' ? 'shared' : 'manager';
+        App.navigate('seguimiento-sanciones-detalle', { id });
+    }
+
+    static async renderSeguimientoSanciones() {
+        const user = AuthManager.getUser();
+        if (!user || (!AuthManager.isAdmin() && user.rol !== 'encargado')) {
+            document.getElementById('contentArea').innerHTML = `
+                <div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Solo administradores y encargados de área pueden gestionar este módulo.</p>
+                <button type="button" class="btn btn-primary" onclick="App.navigate('dashboard')">Ir al inicio</button></div>`;
+            return;
+        }
+
+        const tickets = await SanctionFollowupManager.listForManager();
+        this._cachedSanctionTickets = tickets;
+        const nEsp = tickets.filter(t => t.estado === SanctionFollowupManager.ESTADO_ESPERA).length;
+        const nTer = tickets.filter(t => t.estado === SanctionFollowupManager.ESTADO_TERMINADO).length;
+
+        const content = document.getElementById('contentArea');
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header" style="flex-wrap:wrap;gap:12px;">
+                    <h3 style="flex:1;min-width:200px;"><i class="fas fa-gavel" style="margin-right:8px;color:var(--primary);"></i>Seguimiento de sanciones o quejas</h3>
+                    <div class="tabs" id="sanctionMgrTabs" style="flex:2;justify-content:center;">
+                        <button type="button" class="tab active" data-tab="todas" onclick="App.filterSanctionTickets('todas')">Todos (${tickets.length})</button>
+                        <button type="button" class="tab" data-tab="en_espera" onclick="App.filterSanctionTickets('en_espera')">En espera (${nEsp})</button>
+                        <button type="button" class="tab" data-tab="terminado" onclick="App.filterSanctionTickets('terminado')">Terminado (${nTer})</button>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionCreateModal()"><i class="fas fa-plus"></i> Nuevo ticket</button>
+                </div>
+                <div class="card-body">
+                    <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:16px;">Cada registro es un ticket de texto con estado <strong>En espera</strong> o <strong>Terminado</strong>. Indique qué usuarios pueden leer el caso.</p>
+                    <div id="sanctionMgrListContainer">${this.renderSanctionManagerCards(tickets)}</div>
+                </div>
+            </div>`;
+    }
+
+    static renderSanctionManagerCards(tickets) {
+        if (!tickets || tickets.length === 0) {
+            return `<div class="empty-state"><i class="fas fa-inbox"></i><h3>Sin tickets</h3><p>Cree un nuevo seguimiento con el botón superior.</p></div>`;
+        }
+        return tickets.map(t => {
+            const pend = t.estado === SanctionFollowupManager.ESTADO_ESPERA;
+            const raw = t.texto || '';
+            const excerpt = App.escapeHtml(raw.slice(0, 220)) + (raw.length > 220 ? '…' : '');
+            const puede = SanctionFollowupManager.puedeEditar(t);
+            const idJs = App.escapeJsString(t.id);
+            return `
+            <div class="request-card ${pend ? 'status-pendiente' : ''}" style="margin-bottom:12px;">
+                <div class="request-header">
+                    <div>
+                        <h4>${App.escapeHtml(t.titulo || 'Sin título')}</h4>
+                        <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">
+                            ${App.escapeHtml(t.creadoPorNombre || '')} · ${formatDateTime(t.fechaCreacion)}
+                            ${t.departamento ? ` · ${App.escapeHtml((App._depsMap[t.departamento] || DEPARTAMENTOS[t.departamento])?.nombre || t.departamento)}` : ''}
+                        </p>
+                    </div>
+                    <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(t.estado)}</span>
+                </div>
+                <p style="font-size:0.88rem;color:var(--text-secondary);white-space:pre-wrap;margin-top:10px;">${excerpt}</p>
+                <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+                    <button type="button" class="btn btn-sm btn-outline" onclick="App.openSanctionDetalle('${idJs}','manager')"><i class="fas fa-eye"></i> Ver detalle</button>
+                    ${puede ? `<button type="button" class="btn btn-sm btn-primary" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar</button>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    static filterSanctionTickets(tab) {
+        document.querySelectorAll('#sanctionMgrTabs .tab').forEach(el => el.classList.remove('active'));
+        document.querySelector(`#sanctionMgrTabs .tab[data-tab="${tab}"]`)?.classList.add('active');
+        let list = this._cachedSanctionTickets || [];
+        if (tab === 'en_espera') list = list.filter(t => t.estado === SanctionFollowupManager.ESTADO_ESPERA);
+        else if (tab === 'terminado') list = list.filter(t => t.estado === SanctionFollowupManager.ESTADO_TERMINADO);
+        const container = document.getElementById('sanctionMgrListContainer');
+        if (container) container.innerHTML = this.renderSanctionManagerCards(list);
+    }
+
+    static async showSanctionCreateModal() {
+        const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== AuthManager.getUser().id);
+        users.sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
+        const checks = users.map(u => `
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;">
+                <input type="checkbox" name="sanctionVisible" value="${App.escapeHtml(u.id)}">
+                <span style="font-size:0.88rem;"><strong>${App.escapeHtml(u.nombre)} ${App.escapeHtml(u.apellido)}</strong>
+                <span style="color:var(--text-secondary);"> — ${App.escapeHtml(u.email || '')}</span></span>
+            </label>
+        `).join('');
+
+        this.showModal('Nuevo seguimiento (sanción o queja)', `
+            <form id="sanctionCreateForm" onsubmit="App.submitSanctionCreate(event)">
+                <div class="form-group">
+                    <label>Título</label>
+                    <input class="form-control" id="sanctionCreateTitulo" placeholder="Referencia breve" maxlength="280">
+                </div>
+                <div class="form-group">
+                    <label>Texto del ticket <span class="required">*</span></label>
+                    <textarea class="form-control" id="sanctionCreateTexto" rows="8" required placeholder="Descripción del caso..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Usuarios que pueden ver este seguimiento</label>
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Podrá cambiar esta lista después editando el ticket.</p>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
+                        ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Crear ticket</button>
+                </div>
+            </form>
+        `, true);
+    }
+
+    static async submitSanctionCreate(e) {
+        e.preventDefault();
+        const titulo = document.getElementById('sanctionCreateTitulo')?.value || '';
+        const texto = document.getElementById('sanctionCreateTexto')?.value || '';
+        const form = document.getElementById('sanctionCreateForm');
+        const boxes = form ? form.querySelectorAll('input[name="sanctionVisible"]:checked') : [];
+        const visiblesParaIds = Array.from(boxes).map(b => b.value);
+        try {
+            await SanctionFollowupManager.create({ titulo, texto, visiblesParaIds });
+            Toast.success('Creado', 'El ticket fue registrado correctamente');
+            App.closeModal();
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones');
+        } catch (err) {
+            Toast.error('Error', err.message || String(err));
+        }
+    }
+
+    static async showSanctionEditModal(ticketId) {
+        const t = await SanctionFollowupManager.getById(ticketId);
+        if (!t || !SanctionFollowupManager.puedeEditar(t)) {
+            Toast.error('Error', 'No puede editar este ticket');
+            return;
+        }
+        const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== t.creadoPor);
+        users.sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
+        const vis = t.visiblesPara || {};
+        const checks = users.map(u => `
+            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;">
+                <input type="checkbox" name="sanctionVisible" value="${App.escapeHtml(u.id)}" ${vis[u.id] ? 'checked' : ''}>
+                <span style="font-size:0.88rem;"><strong>${App.escapeHtml(u.nombre)} ${App.escapeHtml(u.apellido)}</strong>
+                <span style="color:var(--text-secondary);"> — ${App.escapeHtml(u.email || '')}</span></span>
+            </label>
+        `).join('');
+
+        const eTitulo = App.escapeHtml(t.titulo || '');
+        const eTexto = App.escapeHtml(t.texto || '');
+        const eId = App.escapeHtml(ticketId);
+        const ev = SanctionFollowupManager.ESTADO_ESPERA;
+        const et = SanctionFollowupManager.ESTADO_TERMINADO;
+
+        this.showModal('Editar seguimiento', `
+            <form id="sanctionEditForm" data-ticket-id="${eId}" onsubmit="App.submitSanctionEdit(event)">
+                <div class="form-group">
+                    <label>Título</label>
+                    <input class="form-control" id="sanctionEditTitulo" value="${eTitulo}" maxlength="280">
+                </div>
+                <div class="form-group">
+                    <label>Texto <span class="required">*</span></label>
+                    <textarea class="form-control" id="sanctionEditTexto" rows="8" required>${eTexto}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Estado</label>
+                    <select class="form-control" id="sanctionEditEstado">
+                        <option value="${ev}" ${t.estado === ev ? 'selected' : ''}>En espera</option>
+                        <option value="${et}" ${t.estado === et ? 'selected' : ''}>Terminado</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Usuarios que pueden ver este seguimiento</label>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
+                        ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
+                    </div>
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar</button>
+                </div>
+            </form>
+        `, true);
+    }
+
+    static async submitSanctionEdit(e) {
+        e.preventDefault();
+        const form = e.target;
+        const ticketId = form?.dataset?.ticketId;
+        if (!ticketId) return;
+        const titulo = document.getElementById('sanctionEditTitulo')?.value || '';
+        const texto = document.getElementById('sanctionEditTexto')?.value || '';
+        const estado = document.getElementById('sanctionEditEstado')?.value;
+        const boxes = form.querySelectorAll('input[name="sanctionVisible"]:checked');
+        const visiblesParaIds = Array.from(boxes).map(b => b.value);
+        try {
+            await SanctionFollowupManager.updateTicket(ticketId, { titulo, texto, estado, visiblesParaIds });
+            Toast.success('Guardado', 'Los cambios fueron aplicados');
+            App.closeModal();
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
+        } catch (err) {
+            Toast.error('Error', err.message || String(err));
+        }
+    }
+
+    static async cambiarEstadoSanction(id, estado) {
+        try {
+            await SanctionFollowupManager.updateTicket(id, { estado });
+            Toast.success('Estado actualizado', SanctionFollowupManager.etiquetaEstado(estado));
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones-detalle', { id });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async eliminarSanction(id) {
+        if (!confirm('¿Eliminar definitivamente este seguimiento?')) return;
+        try {
+            await SanctionFollowupManager.deleteTicket(id);
+            Toast.success('Eliminado', 'El ticket fue eliminado');
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones');
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async renderSeguimientoCompartidos() {
+        const list = await SanctionFollowupManager.listSharedWithMe();
+        const content = document.getElementById('contentArea');
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-user-shield" style="margin-right:8px;color:var(--primary);"></i>Seguimientos compartidos conmigo</h3>
+                </div>
+                <div class="card-body">
+                    <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:16px;">Solo lectura. Quien creó el ticket eligió que usted pueda verlo.</p>
+                    <div id="sanctionSharedListContainer">${this.renderSanctionSharedCards(list)}</div>
+                </div>
+            </div>`;
+    }
+
+    static renderSanctionSharedCards(tickets) {
+        if (!tickets || tickets.length === 0) {
+            return `<div class="empty-state"><i class="fas fa-folder-open"></i><h3>Nada por aquí</h3><p>Aún no hay seguimientos compartidos con su usuario.</p></div>`;
+        }
+        return tickets.map(t => {
+            const pend = t.estado === SanctionFollowupManager.ESTADO_ESPERA;
+            const raw = t.texto || '';
+            const excerpt = App.escapeHtml(raw.slice(0, 240)) + (raw.length > 240 ? '…' : '');
+            const idJs = App.escapeJsString(t.id);
+            return `
+            <div class="request-card ${pend ? 'status-pendiente' : ''}" style="margin-bottom:12px;cursor:pointer;" onclick="App.openSanctionDetalle('${idJs}','shared')">
+                <div class="request-header">
+                    <div>
+                        <h4>${App.escapeHtml(t.titulo || 'Sin título')}</h4>
+                        <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">${App.escapeHtml(t.creadoPorNombre || '')} · ${formatDateTime(t.fechaCreacion)}</p>
+                    </div>
+                    <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(t.estado)}</span>
+                </div>
+                <p style="font-size:0.88rem;color:var(--text-secondary);white-space:pre-wrap;margin-top:10px;">${excerpt}</p>
+            </div>`;
+        }).join('');
+    }
+
+    static async renderSeguimientoSancionesDetalle(id) {
+        if (!id) {
+            document.getElementById('contentArea').innerHTML = `<div class="empty-state"><i class="fas fa-link-slash"></i><h3>Sin referencia</h3></div>`;
+            return;
+        }
+        const ticket = await SanctionFollowupManager.getById(id);
+        const content = document.getElementById('contentArea');
+        if (!ticket || !SanctionFollowupManager.puedeVer(ticket)) {
+            content.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>No disponible</h3><p>No tiene permiso para ver este seguimiento o no existe.</p>
+                <button type="button" class="btn btn-primary" onclick="App.navigate('dashboard')">Volver</button></div>`;
+            return;
+        }
+
+        const puedeEditar = SanctionFollowupManager.puedeEditar(ticket);
+        const volver = App._sanctionDetalleSource === 'shared' ? 'seguimiento-compartidos' : 'seguimiento-sanciones';
+        const visibles = Object.keys(ticket.visiblesPara || {});
+        let visLine = 'Ningún otro usuario (solo administración y quien creó el ticket)';
+        if (visibles.length) {
+            const all = await AuthManager.getAllUsers();
+            const map = Object.fromEntries(all.map(u => [u.id, u]));
+            visLine = visibles.map(uid => {
+                const u = map[uid];
+                return u ? `${u.nombre} ${u.apellido}` : uid;
+            }).join(', ');
+        }
+
+        const pend = ticket.estado === SanctionFollowupManager.ESTADO_ESPERA;
+        const idJs = App.escapeJsString(id);
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header" style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+                    <div>
+                        <button type="button" class="btn btn-outline btn-sm" onclick="App.navigate('${volver}')"><i class="fas fa-arrow-left"></i> Volver</button>
+                        <h3 style="margin-top:12px;"><i class="fas fa-file-alt" style="margin-right:8px;color:var(--primary);"></i>${App.escapeHtml(ticket.titulo || 'Sin título')}</h3>
+                    </div>
+                    <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}" style="align-self:flex-start;"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(ticket.estado)}</span>
+                </div>
+                <div class="card-body">
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;">
+                        Creado por <strong>${App.escapeHtml(ticket.creadoPorNombre || '')}</strong>
+                        · ${formatDateTime(ticket.fechaCreacion)}
+                        ${ticket.fechaCierre ? ` · Cierre: ${formatDateTime(ticket.fechaCierre)}` : ''}
+                    </p>
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;"><strong>Pueden ver el texto:</strong> ${App.escapeHtml(visLine)}</p>
+                    <div style="padding:16px;background:var(--bg-main);border-radius:var(--radius-md);border:1px solid var(--border-light);white-space:pre-wrap;font-size:0.92rem;line-height:1.5;">${App.escapeHtml(ticket.texto || '')}</div>
+                    ${puedeEditar ? `
+                    <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-success btn-sm" onclick="App.cambiarEstadoSanction('${idJs}','terminado')" ${pend ? '' : 'disabled style="opacity:0.45;"'}><i class="fas fa-check"></i> Marcar terminado</button>
+                        <button type="button" class="btn btn-outline btn-sm" onclick="App.cambiarEstadoSanction('${idJs}','en_espera')" ${pend ? 'disabled style="opacity:0.45;"' : ''}><i class="fas fa-undo"></i> Volver a en espera</button>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar</button>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="App.eliminarSanction('${idJs}')"><i class="fas fa-trash"></i> Eliminar</button>
+                    </div>` : ''}
+                </div>
+            </div>`;
+    }
+
+    // ========================================================
     // USUARIOS (ADMIN)
     // ========================================================
     static async renderUsuarios() {
@@ -2746,7 +3176,10 @@ ${texto}</pre>
             <div class="card">
                 <div class="card-header">
                     <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
-                    <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div style="text-align:center;padding:40px;">
@@ -2767,7 +3200,10 @@ ${texto}</pre>
                 <div class="card">
                     <div class="card-header">
                         <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
-                        <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                            <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="empty-state">
@@ -2791,7 +3227,10 @@ ${texto}</pre>
             <div class="card">
                 <div class="card-header">
                     <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
-                    <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus"></i> Nuevo Usuario</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                        <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus"></i> Nuevo Usuario</button>
+                    </div>
                 </div>
                 <div class="card-body no-padding">
                     <div class="filters-bar" style="padding:16px 16px 0 16px;">
@@ -2819,7 +3258,10 @@ ${texto}</pre>
                 <div class="card">
                     <div class="card-header">
                         <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
-                        <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                        <div style="display:flex;gap:8px;">
+                            <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                            <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
+                        </div>
                     </div>
                     <div class="card-body">
                         <div class="empty-state">
@@ -2849,6 +3291,12 @@ ${texto}</pre>
 
         return users.map(u => {
             const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
+            const managedExtra = u.rol === 'encargado'
+                ? AuthManager.getDepartamentosEncargado(u).filter(id => id !== u.departamento)
+                : [];
+            const deptExtraHtml = managedExtra.length
+                ? `<small style="display:block;margin-top:4px;color:var(--text-light);font-weight:400;">Encarga también: ${managedExtra.map(id => App.escapeHtml((App._depsMap[id] || DEPARTAMENTOS[id])?.nombre || id)).join(', ')}</small>`
+                : '';
             const initials = (u.nombre[0] + u.apellido[0]).toUpperCase();
             const hasCode = u.codigoPersonal ? true : false;
             return `<tr>
@@ -2860,7 +3308,7 @@ ${texto}</pre>
                 <td>${u.puesto || '<span style="color:var(--text-light);">Sin puesto</span>'}</td>
                 <td>${u.email}</td>
                 <td><span class="role-badge ${u.rol}">${ROLES[u.rol]?.nombre || u.rol}</span></td>
-                <td><span class="dep-chip" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-building'}"></i> ${dep?.nombre || 'N/A'}</span></td>
+                <td><span class="dep-chip" style="background:${dep?.color || '#546e7a'};"><i class="${dep?.icono || 'fas fa-building'}"></i> ${dep?.nombre || 'N/A'}${deptExtraHtml}</span></td>
                 <td>
                     ${hasCode ?
                         `<span style="display:inline-flex;align-items:center;gap:6px;padding:4px 8px;background:var(--success-light);color:var(--success);border-radius:4px;font-size:0.85rem;">
@@ -2874,6 +3322,9 @@ ${texto}</pre>
                 <td><span class="status-badge ${u.activo ? 'aprobada' : 'rechazada'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
                     <button class="btn btn-sm btn-outline" onclick="App.showEditUserModal('${u.id}')" title="Editar"><i class="fas fa-edit"></i></button>
+                    <button class="btn btn-sm btn-outline" onclick="App.handleResetUserPassword('${u.id}')" title="Forzar cambio de contraseña" style="border-color:var(--warning);color:var(--warning);">
+                        <i class="fas fa-unlock-alt"></i>
+                    </button>
                     <button class="btn btn-sm btn-outline" onclick="App.showManageCodeModal('${u.id}')" title="Gestionar código de firma" style="border-color:var(--primary);color:var(--primary);">
                         <i class="fas fa-key"></i>
                     </button>
@@ -2894,12 +3345,16 @@ ${texto}</pre>
         let users = this._cachedUsers;
 
         if (depFilter) {
-            users = users.filter(u => u.departamento === depFilter);
+            users = users.filter(u => AuthManager.getDepartamentosEncargado(u).includes(depFilter));
         }
 
         if (query) {
             users = users.filter(u => {
                 const dep = App._depsMap[u.departamento] || DEPARTAMENTOS[u.departamento];
+                const extraDepNames = AuthManager.getDepartamentosEncargado(u)
+                    .map(id => (App._depsMap[id] || DEPARTAMENTOS[id])?.nombre || '')
+                    .join(' ')
+                    .toLowerCase();
                 const fullName = `${u.nombre || ''} ${u.apellido || ''}`.toLowerCase();
                 const cedula = (u.cedula || '').toLowerCase();
                 const puesto = (u.puesto || '').toLowerCase();
@@ -2914,17 +3369,51 @@ ${texto}</pre>
                     email.includes(query) ||
                     roleName.includes(query) ||
                     depName.includes(query) ||
-                    depCode.includes(query);
+                    depCode.includes(query) ||
+                    extraDepNames.includes(query);
             });
         }
 
         tableBody.innerHTML = this.renderUsersRows(users);
     }
 
+    static buildEncargadoDepartamentosCheckboxesHtml(nameAttr, preselectedIds = []) {
+        const selected = new Set(preselectedIds);
+        let html = '';
+        Object.keys(App._depsMap).forEach(key => {
+            const dep = App._depsMap[key];
+            const chk = selected.has(key) ? 'checked' : '';
+            html += `<label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;"><input type="checkbox" name="${nameAttr}" value="${key}" ${chk}> <span>${App.escapeHtml(dep.nombre)} <small style="color:var(--text-secondary);">(${App.escapeHtml(key)})</small></span></label>`;
+        });
+        return html;
+    }
+
+    static syncEncargadoDepartamentosUI(mode) {
+        const rolEl = document.getElementById(mode === 'new' ? 'newUserRol' : 'editUserRol');
+        const wrap = document.getElementById(mode === 'new' ? 'newUserEncDepsWrap' : 'editUserEncDepsWrap');
+        if (!rolEl || !wrap) return;
+        const show = rolEl.value === 'encargado';
+        wrap.style.display = show ? 'block' : 'none';
+        if (show) App.syncPrimaryDepCheckbox(mode);
+    }
+
+    static syncPrimaryDepCheckbox(mode) {
+        const depSel = document.getElementById(mode === 'new' ? 'newUserDep' : 'editUserDep');
+        const wrap = document.getElementById(mode === 'new' ? 'newUserEncDepsWrap' : 'editUserEncDepsWrap');
+        if (!depSel || !wrap || wrap.style.display === 'none') return;
+        const v = depSel.value;
+        if (!v) return;
+        wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            if (cb.value === v) cb.checked = true;
+        });
+    }
+
     static async showCreateUserModal() {
         await this.ensureDepsLoaded();
         let depsOpts = '';
         Object.keys(App._depsMap).forEach(key => { depsOpts += `<option value="${key}">${App._depsMap[key].nombre}</option>`; });
+
+        const encChecks = App.buildEncargadoDepartamentosCheckboxesHtml('newUserEncDep', []);
 
         this.showModal('Crear Nuevo Usuario', `
             <form onsubmit="App.handleCreateUser(event)">
@@ -2935,11 +3424,22 @@ ${texto}</pre>
                 <div class="form-group"><label>Cédula <span class="required">*</span></label><input type="text" class="form-control" id="newUserCedula" required></div>
                 <div class="form-group"><label>Puesto <span class="required">*</span></label><input type="text" class="form-control" id="newUserPuesto" required></div>
                 <div class="form-group"><label>Email <span class="required">*</span></label><input type="email" class="form-control" id="newUserEmail" required></div>
-                <div class="form-group"><label>Contraseña <span class="required">*</span> (mín. 6 caracteres)</label><input type="password" class="form-control" id="newUserPassword" required minlength="6"></div>
+                <div class="form-group">
+                    <label>Contraseña temporal <span class="required">*</span> (mín. 6 caracteres)</label>
+                    <input type="password" class="form-control" id="newUserPassword" value="123456" required minlength="6">
+                    <small style="display:block;margin-top:6px;color:var(--text-light);">El usuario deberá cambiarla al primer ingreso.</small>
+                </div>
                 <div class="form-row">
-                    <div class="form-group"><label>Rol <span class="required">*</span></label><select class="form-control" id="newUserRol" required><option value="">Seleccionar...</option>
+                    <div class="form-group"><label>Rol <span class="required">*</span></label><select class="form-control" id="newUserRol" required onchange="App.syncEncargadoDepartamentosUI('new')"><option value="">Seleccionar...</option>
                         ${Object.keys(ROLES).map(r => `<option value="${r}">${ROLES[r].nombre}</option>`).join('')}</select></div>
-                    <div class="form-group"><label>Departamento <span class="required">*</span></label><select class="form-control" id="newUserDep" required><option value="">Seleccionar...</option>${depsOpts}</select></div>
+                    <div class="form-group"><label>Departamento principal <span class="required">*</span></label><select class="form-control" id="newUserDep" required onchange="App.syncPrimaryDepCheckbox('new')"><option value="">Seleccionar...</option>${depsOpts}</select></div>
+                </div>
+                <div class="form-group" id="newUserEncDepsWrap" style="display:none;">
+                    <label>Departamentos donde es encargado de área</label>
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Marque cada área que esta persona supervisa. El departamento principal queda incluido automáticamente.</p>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
+                        ${encChecks}
+                    </div>
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
@@ -2947,6 +3447,7 @@ ${texto}</pre>
                 </div>
             </form>
         `);
+        App.syncEncargadoDepartamentosUI('new');
     }
 
     static async handleCreateUser(e) {
@@ -2955,6 +3456,17 @@ ${texto}</pre>
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creando...';
 
+        const rol = document.getElementById('newUserRol').value;
+        const dep = document.getElementById('newUserDep').value;
+        let departamentosEncargado = null;
+        if (rol === 'encargado') {
+            departamentosEncargado = {};
+            document.querySelectorAll('input[name="newUserEncDep"]:checked').forEach(cb => {
+                departamentosEncargado[cb.value] = true;
+            });
+            departamentosEncargado[dep] = true;
+        }
+
         const userData = {
             nombre: document.getElementById('newUserNombre').value,
             apellido: document.getElementById('newUserApellido').value,
@@ -2962,8 +3474,9 @@ ${texto}</pre>
             puesto: document.getElementById('newUserPuesto').value.trim(),
             email: document.getElementById('newUserEmail').value,
             password: document.getElementById('newUserPassword').value,
-            rol: document.getElementById('newUserRol').value,
-            departamento: document.getElementById('newUserDep').value
+            rol,
+            departamento: dep,
+            departamentosEncargado
         };
 
         const result = await AuthManager.createUser(userData);
@@ -2979,6 +3492,97 @@ ${texto}</pre>
         }
     }
 
+    static showChangePasswordModal(forced = false) {
+        this._forcePasswordModal = Boolean(forced);
+        const forcedHtml = forced
+            ? `<div style="padding:12px;border-radius:8px;background:var(--warning-light);color:var(--warning);margin-bottom:14px;">
+                    <i class="fas fa-exclamation-triangle"></i> Debe cambiar su contraseña temporal para continuar usando el sistema.
+               </div>`
+            : '';
+        this.showModal('Cambiar Mi Contraseña', `
+            ${forcedHtml}
+            <form onsubmit="App.handleChangePassword(event)">
+                <div class="form-group">
+                    <label>Contraseña actual</label>
+                    <input type="password" class="form-control" id="currentPasswordInput" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label>Nueva contraseña</label>
+                    <input type="password" class="form-control" id="newPasswordInput" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label>Confirmar nueva contraseña</label>
+                    <input type="password" class="form-control" id="confirmPasswordInput" required minlength="6">
+                </div>
+                <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+                    ${forced ? '' : '<button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>'}
+                    <button type="submit" class="btn btn-primary" id="btnChangePassword"><i class="fas fa-save"></i> Guardar contraseña</button>
+                </div>
+            </form>
+        `);
+    }
+
+    static async handleChangePassword(e) {
+        e.preventDefault();
+        const btn = document.getElementById('btnChangePassword');
+        const currentPassword = document.getElementById('currentPasswordInput').value;
+        const newPassword = document.getElementById('newPasswordInput').value;
+        const confirmPassword = document.getElementById('confirmPasswordInput').value;
+
+        if (newPassword !== confirmPassword) {
+            Toast.error('Validación', 'La confirmación de contraseña no coincide');
+            return;
+        }
+        if (newPassword.length < 6) {
+            Toast.error('Validación', 'La nueva contraseña debe tener al menos 6 caracteres');
+            return;
+        }
+        if (currentPassword === newPassword) {
+            Toast.error('Validación', 'La nueva contraseña debe ser distinta a la actual');
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+
+        const result = await AuthManager.changeCurrentPassword(currentPassword, newPassword);
+        if (!result.success) {
+            Toast.error('Error', result.message || 'No se pudo actualizar la contraseña');
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fas fa-save"></i> Guardar contraseña';
+            return;
+        }
+
+        this._forcePasswordModal = false;
+        this.closeModal();
+        Toast.success('Éxito', 'Su contraseña personal se actualizó correctamente');
+        if (this.currentView === 'usuarios') {
+            this.navigate('usuarios');
+        }
+    }
+
+    static async handleResetUserPassword(userId) {
+        const user = await AuthManager.getUserById(userId);
+        if (!user || !user.email) {
+            Toast.error('Error', 'No se encontró el usuario o su correo');
+            return;
+        }
+
+        const markResult = await AuthManager.markUserMustChangePassword(userId, true);
+        if (!markResult.success) {
+            Toast.error('Error', markResult.message || 'No se pudo actualizar el estado del usuario');
+            return;
+        }
+
+        const resetResult = await AuthManager.sendPasswordReset(user.email);
+        if (!resetResult.success) {
+            Toast.warning('Aviso', 'Se marcó el cambio obligatorio, pero no se pudo enviar correo automático');
+            return;
+        }
+
+        Toast.success('Listo', `Se envió correo de restablecimiento a ${user.email}`);
+    }
+
     static async showEditUserModal(userId) {
         const user = await AuthManager.getUserById(userId);
         if (!user) return;
@@ -2986,6 +3590,9 @@ ${texto}</pre>
         await this.ensureDepsLoaded();
         let depsOpts = '';
         Object.keys(App._depsMap).forEach(key => { depsOpts += `<option value="${key}" ${user.departamento === key ? 'selected' : ''}>${App._depsMap[key].nombre}</option>`; });
+
+        const encPreselected = AuthManager.getDepartamentosEncargado(user);
+        const encChecks = App.buildEncargadoDepartamentosCheckboxesHtml('editUserEncDep', encPreselected);
 
         this.showModal('Editar Usuario', `
             <form onsubmit="App.handleEditUser(event, '${userId}')">
@@ -2997,9 +3604,16 @@ ${texto}</pre>
                 <div class="form-group"><label>Puesto</label><input type="text" class="form-control" id="editUserPuesto" value="${user.puesto || ''}" required></div>
                 <div class="form-group"><label>Email</label><input type="email" class="form-control" id="editUserEmail" value="${user.email}" required></div>
                 <div class="form-row">
-                    <div class="form-group"><label>Rol</label><select class="form-control" id="editUserRol" required>
+                    <div class="form-group"><label>Rol</label><select class="form-control" id="editUserRol" required onchange="App.syncEncargadoDepartamentosUI('edit')">
                         ${Object.keys(ROLES).map(r => `<option value="${r}" ${user.rol === r ? 'selected' : ''}>${ROLES[r].nombre}</option>`).join('')}</select></div>
-                    <div class="form-group"><label>Departamento</label><select class="form-control" id="editUserDep" required>${depsOpts}</select></div>
+                    <div class="form-group"><label>Departamento principal</label><select class="form-control" id="editUserDep" required onchange="App.syncPrimaryDepCheckbox('edit')">${depsOpts}</select></div>
+                </div>
+                <div class="form-group" id="editUserEncDepsWrap" style="display:none;">
+                    <label>Departamentos donde es encargado de área</label>
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Marque cada área que esta persona supervisa. El departamento principal queda incluido automáticamente.</p>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
+                        ${encChecks}
+                    </div>
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
@@ -3007,6 +3621,7 @@ ${texto}</pre>
                 </div>
             </form>
         `);
+        App.syncEncargadoDepartamentosUI('edit');
     }
 
     static async handleEditUser(e, userId) {
@@ -3015,14 +3630,26 @@ ${texto}</pre>
         btn.disabled = true;
         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
 
+        const rol = document.getElementById('editUserRol').value;
+        const dep = document.getElementById('editUserDep').value;
+        let departamentosEncargado = null;
+        if (rol === 'encargado') {
+            departamentosEncargado = {};
+            document.querySelectorAll('input[name="editUserEncDep"]:checked').forEach(cb => {
+                departamentosEncargado[cb.value] = true;
+            });
+            departamentosEncargado[dep] = true;
+        }
+
         const updates = {
             nombre: document.getElementById('editUserNombre').value,
             apellido: document.getElementById('editUserApellido').value,
             cedula: document.getElementById('editUserCedula').value.trim(),
             puesto: document.getElementById('editUserPuesto').value.trim(),
             email: document.getElementById('editUserEmail').value,
-            rol: document.getElementById('editUserRol').value,
-            departamento: document.getElementById('editUserDep').value
+            rol,
+            departamento: dep,
+            departamentosEncargado
         };
 
         await AuthManager.updateUser(userId, updates);
@@ -3758,6 +4385,7 @@ ${texto}</pre>
     }
 
     static closeModal() {
+        if (this._forcePasswordModal) return;
         document.getElementById('modalOverlay').classList.remove('open');
     }
 }
