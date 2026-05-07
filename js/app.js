@@ -204,6 +204,7 @@ class App {
                 case 'dashboard': await this.renderDashboard(); break;
                 case 'crear-documento': await this.renderCrearDocumento(); break;
                 case 'documentos': await this.renderDocumentos(); break;
+                case 'politicas-internas': await this.renderPoliticasInternas(); break;
                 case 'ver-documento': await this.renderVerDocumento(params.id); break;
                 case 'solicitudes': await this.renderSolicitudes(); break;
                 case 'nueva-solicitud': this.renderNuevaSolicitud(); break;
@@ -245,6 +246,7 @@ class App {
             'dashboard': { title: 'Dashboard', desc: 'Panel de control general' },
             'crear-documento': { title: 'Crear Documento', desc: 'Nuevo comunicado oficial' },
             'documentos': { title: 'Documentos', desc: 'Gestión de documentos por departamento' },
+            'politicas-internas': { title: 'Biblioteca / Políticas internas', desc: 'PDFs corporativos para consulta y descarga' },
             'ver-documento': { title: 'Ver Documento', desc: 'Detalle del documento' },
             'solicitudes': { title: 'Mis Solicitudes', desc: 'Vacaciones y permisos' },
             'nueva-solicitud': { title: 'Nueva Solicitud', desc: 'Solicitar vacaciones o permisos' },
@@ -323,16 +325,32 @@ class App {
             ? 'Docs. Mis áreas'
             : 'Docs. Mi Departamento';
 
-        const [docStats, reqStats, pendingReqs, sharedSanctions] = await Promise.all([
+        /** Admin y encargados: métricas globales de gestión; empleados: solo sus propias solicitudes en las dos últimas tarjetas. */
+        const isMgrDashboard = AuthManager.isEncargado();
+
+        let pendingReqs = [];
+        let myAllReqs = [];
+        if (isMgrDashboard) {
+            pendingReqs = await RequestManager.getPendingActionsForUser(user);
+        } else {
+            myAllReqs = await RequestManager.getByUser(user.id);
+            pendingReqs = myAllReqs.filter(r => RequestManager.isEstadoPendienteEmpleado(r.estado));
+        }
+
+        const [docStats, reqStats, sharedSanctions] = await Promise.all([
             DocumentManager.getStats(),
-            RequestManager.getStats(),
-            AuthManager.isEncargado()
-                ? RequestManager.getPendingActionsForUser(user)
-                : RequestManager.getByUser(user.id).then(reqs => reqs.filter(r => RequestManager.isEstadoPendienteEmpleado(r.estado))),
+            isMgrDashboard ? RequestManager.getStats() : Promise.resolve({ aprobadas: 0 }),
             typeof SanctionFollowupManager !== 'undefined'
                 ? SanctionFollowupManager.listSharedWithMe()
                 : Promise.resolve([])
         ]);
+
+        const stat3Num = isMgrDashboard ? pendingReqs.length : myAllReqs.length;
+        const stat3Label = isMgrDashboard ? 'Solicitudes Pendientes' : 'Mis solicitudes';
+        const stat4Num = isMgrDashboard
+            ? reqStats.aprobadas
+            : myAllReqs.filter(r => r.estado === 'aprobada').length;
+        const stat4Label = isMgrDashboard ? 'Solicitudes Aprobadas' : 'Mis solicitudes aprobadas';
 
         const content = document.getElementById('contentArea');
         content.innerHTML = `
@@ -354,15 +372,15 @@ class App {
                 <div class="stat-card">
                     <div class="stat-icon" style="background: var(--gradient-accent);"><i class="fas fa-clock"></i></div>
                     <div class="stat-info">
-                        <h3>${pendingReqs.length}</h3>
-                        <p>${AuthManager.isEncargado() ? 'Solicitudes Pendientes' : 'Mis Solicitudes Pendientes'}</p>
+                        <h3>${stat3Num}</h3>
+                        <p>${stat3Label}</p>
                     </div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-icon" style="background: var(--gradient-success);"><i class="fas fa-check-circle"></i></div>
                     <div class="stat-info">
-                        <h3>${reqStats.aprobadas}</h3>
-                        <p>Solicitudes Aprobadas</p>
+                        <h3>${stat4Num}</h3>
+                        <p>${stat4Label}</p>
                     </div>
                 </div>
             </div>
@@ -397,8 +415,8 @@ class App {
                             <div class="empty-state">
                                 <i class="fas fa-file-alt"></i>
                                 <h3>No hay documentos</h3>
-                                <p>Crea tu primer documento</p>
-                                <button class="btn btn-primary" onclick="App.navigate('crear-documento')">Crear documento</button>
+                                <p>${isMgrDashboard ? 'Crea tu primer documento' : 'No hay documentos recientes para mostrar'}</p>
+                                ${isMgrDashboard ? `<button type="button" class="btn btn-primary" onclick="App.navigate('crear-documento')">Crear documento</button>` : ''}
                             </div>
                         `}
                     </div>
@@ -407,7 +425,7 @@ class App {
                 <div class="card">
                     <div class="card-header">
                         <h3><i class="fas fa-bell" style="margin-right:8px;color:var(--warning);"></i>Solicitudes Pendientes</h3>
-                        <button class="btn btn-sm btn-outline" onclick="App.navigate('${AuthManager.isEncargado() ? 'gestionar-solicitudes' : 'solicitudes'}')">Ver todas</button>
+                        ${AuthManager.isEncargado() ? `<button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('gestionar-solicitudes')">Ver todas</button>` : ''}
                     </div>
                     <div class="card-body no-padding">
                         ${pendingReqs.length > 0 ? `
@@ -857,6 +875,222 @@ class App {
 
         // Store docs for filtering (todos los documentos para admins, filtrados para usuarios)
         this._cachedDocs = filteredDocs;
+    }
+
+    // ========================================================
+    // BIBLIOTECA / POLÍTICAS INTERNAS (PDF en RTDB, Base64)
+    // ========================================================
+    static _cachedPoliticas = [];
+
+    static renderPoliticasInternasListHtml(politicas, isAdmin) {
+        if (!politicas || politicas.length === 0) {
+            return `<div class="empty-state"><i class="fas fa-filter"></i><h3>Sin resultados</h3><p>No hay políticas que coincidan con el filtro o la búsqueda.</p></div>`;
+        }
+        return `<div class="doc-list">
+            ${politicas.map((p) => {
+                const escTitulo = App.escapeHtml(p.titulo);
+                const escDesc = p.descripcion ? `<p style="margin:4px 0 0;font-size:0.85rem;color:var(--text-secondary);">${App.escapeHtml(p.descripcion)}</p>` : '';
+                const meta = `${App.escapeHtml(p.creadoPorNombre || '')} · ${formatDate(p.fechaCreacion)} · ${PoliticaInternaManager.formatBytes(p.tamañoBytes)}`;
+                const nameEsc = App.escapeJsString(p.nombreArchivo || 'politica.pdf');
+                const idEsc = App.escapeJsString(p.id);
+                return `
+                    <div class="doc-item" style="align-items:flex-start;">
+                        <div class="doc-icon" style="background:#b71c1c;"><i class="fas fa-file-pdf"></i></div>
+                        <div class="doc-info" style="flex:1;">
+                            <h4>${escTitulo}</h4>
+                            ${escDesc}
+                            <div class="doc-meta" style="margin-top:6px;">
+                                <span>${meta}</span>
+                            </div>
+                            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;">
+                                <button type="button" class="btn btn-sm btn-primary" onclick="App.abrirPoliticaPdf('${idEsc}')"><i class="fas fa-eye" style="margin-right:4px;"></i>Ver PDF</button>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="App.descargarPoliticaPdf('${idEsc}', '${nameEsc}')"><i class="fas fa-download" style="margin-right:4px;"></i>Descargar</button>
+                                ${isAdmin ? `<button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.eliminarPoliticaInterna('${idEsc}')"><i class="fas fa-trash-alt" style="margin-right:4px;"></i>Eliminar</button>` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+            }).join('')}
+        </div>`;
+    }
+
+    static filterPoliticasInternas() {
+        const q = (document.getElementById('politicaSearchInput')?.value || '').toLowerCase().trim();
+        const sort = document.getElementById('politicaSortSelect')?.value || 'fecha_desc';
+        let items = [...(App._cachedPoliticas || [])];
+
+        if (q) {
+            items = items.filter((p) => {
+                const hay = (s) => String(s || '').toLowerCase().includes(q);
+                return hay(p.titulo) || hay(p.descripcion) || hay(p.nombreArchivo) || hay(p.creadoPorNombre);
+            });
+        }
+
+        items.sort((a, b) => {
+            if (sort === 'fecha_asc') return new Date(a.fechaCreacion) - new Date(b.fechaCreacion);
+            if (sort === 'titulo_az') return String(a.titulo || '').localeCompare(String(b.titulo || ''), 'es', { sensitivity: 'base' });
+            return new Date(b.fechaCreacion) - new Date(a.fechaCreacion);
+        });
+
+        const container = document.getElementById('politicasListContainer');
+        if (!container) return;
+        container.innerHTML = App.renderPoliticasInternasListHtml(items, AuthManager.isAdmin());
+    }
+
+    static async renderPoliticasInternas() {
+        const content = document.getElementById('contentArea');
+        const list = typeof PoliticaInternaManager !== 'undefined'
+            ? await PoliticaInternaManager.getAll()
+            : [];
+        const isAdmin = AuthManager.isAdmin();
+        this._cachedPoliticas = list;
+
+        const introPoliticas = isAdmin
+            ? `<p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;">
+                        A continuación, va a poder leer, descargar las políticas internas de la empresa.
+                    </p>`
+            : `<p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;">
+                        Aquí puede <strong>consultar y descargar</strong> las políticas internas en PDF.
+                        La publicación y eliminación de documentos la realizan únicamente los <strong>administradores</strong>.
+                    </p>`;
+
+        const uploadBlock = isAdmin ? `
+            <div class="card" style="margin-bottom:20px;">
+                <div class="card-header">
+                    <h3 style="font-size:1rem;"><i class="fas fa-cloud-upload-alt" style="margin-right:8px;color:var(--primary);"></i>Publicar política (PDF)</h3>
+                </div>
+                <div class="card-body">
+                    <form id="formPoliticaInterna" onsubmit="App.handlePoliticaUpload(event)">
+                        <div style="display:grid;gap:14px;max-width:640px;">
+                            <div class="form-group">
+                                <label>Título <span style="color:var(--danger);">*</span></label>
+                                <input type="text" id="politicaTitulo" class="form-control" required maxlength="300" placeholder="Ej. Política de uso de correo electrónico">
+                            </div>
+                            <div class="form-group">
+                                <label>Descripción (opcional)</label>
+                                <input type="text" id="politicaDesc" class="form-control" maxlength="2000" placeholder="Breve resumen para la lista">
+                            </div>
+                            <div class="form-group">
+                                <label>Archivo PDF <span style="color:var(--danger);">*</span></label>
+                                <input type="file" id="politicaFile" accept=".pdf,application/pdf" required>
+                                <p style="font-size:0.8rem;color:var(--text-secondary);margin-top:6px;">Máximo 4 MB por archivo (se guarda en la base de datos). Solo PDF.</p>
+                            </div>
+                            <div>
+                                <button type="submit" class="btn btn-primary" id="btnPoliticaSubmit"><i class="fas fa-upload" style="margin-right:6px;"></i>Subir y publicar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        ` : '';
+
+        const listBody = list.length === 0
+            ? `<div class="empty-state"><i class="fas fa-file-pdf"></i><h3>Sin documentos en la biblioteca</h3><p>${isAdmin ? 'Publique el primer PDF usando el formulario superior.' : 'Cuando se publiquen políticas, aparecerán aquí.'}</p></div>`
+            : `
+                    <div class="filters-bar">
+                        <div class="search-input">
+                            <i class="fas fa-search"></i>
+                            <input type="text" placeholder="Buscar por título, descripción, nombre de archivo o quien publicó…" id="politicaSearchInput" oninput="App.filterPoliticasInternas()">
+                        </div>
+                        <select class="filter-select" id="politicaSortSelect" onchange="App.filterPoliticasInternas()">
+                            <option value="fecha_desc">Más recientes primero</option>
+                            <option value="fecha_asc">Más antiguos primero</option>
+                            <option value="titulo_az">Título (A–Z)</option>
+                        </select>
+                    </div>
+                    <div id="politicasListContainer">${this.renderPoliticasInternasListHtml(list, isAdmin)}</div>
+            `;
+
+        content.innerHTML = `
+            ${uploadBlock}
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-book" style="margin-right:8px;color:var(--primary);"></i>Biblioteca — Políticas internas</h3>
+                </div>
+                <div class="card-body">
+                    ${introPoliticas}
+                    ${listBody}
+                </div>
+            </div>
+        `;
+    }
+
+    static async handlePoliticaUpload(e) {
+        e.preventDefault();
+        if (!AuthManager.isAdmin()) {
+            Toast.error('Permiso denegado', 'Solo los administradores pueden publicar políticas en la biblioteca.');
+            return;
+        }
+        const titulo = document.getElementById('politicaTitulo')?.value;
+        const descripcion = document.getElementById('politicaDesc')?.value;
+        const fileInput = document.getElementById('politicaFile');
+        const file = fileInput?.files?.[0];
+        const btn = document.getElementById('btnPoliticaSubmit');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin" style="margin-right:6px;"></i>Guardando...';
+        }
+        try {
+            Toast.info('Guardando', 'Leyendo el PDF y publicando en la base de datos...');
+            await PoliticaInternaManager.create({ titulo, descripcion, file });
+            Toast.success('Publicado', 'El documento ya está disponible para todos los usuarios.');
+            await this.renderPoliticasInternas();
+        } catch (err) {
+            console.error(err);
+            Toast.error('Error', err.message || 'No se pudo publicar el PDF');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-upload" style="margin-right:6px;"></i>Subir y publicar';
+            }
+        }
+    }
+
+    static async abrirPoliticaPdf(id) {
+        try {
+            const { blob } = await PoliticaInternaManager.getPdfBlob(id);
+            const url = URL.createObjectURL(blob);
+            const w = window.open(url, '_blank', 'noopener,noreferrer');
+            if (!w) {
+                Toast.error('Ventana bloqueada', 'Permita ventanas emergentes para este sitio o use Descargar.');
+            }
+            setTimeout(() => URL.revokeObjectURL(url), 120000);
+        } catch (err) {
+            console.error(err);
+            Toast.error('Error', err.message || 'No se pudo abrir el PDF.');
+        }
+    }
+
+    static async descargarPoliticaPdf(id, nombreArchivo) {
+        try {
+            const { blob } = await PoliticaInternaManager.getPdfBlob(id);
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = nombreArchivo || 'documento.pdf';
+            a.rel = 'noopener';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 3000);
+        } catch (err) {
+            console.error(err);
+            Toast.error('Error', err.message || 'No se pudo descargar el archivo.');
+        }
+    }
+
+    static async eliminarPoliticaInterna(id) {
+        if (!AuthManager.isAdmin()) {
+            Toast.error('Permiso denegado', 'Solo los administradores pueden eliminar políticas.');
+            return;
+        }
+        if (!id || !confirm('¿Eliminar esta política y su archivo? Esta acción no se puede deshacer.')) return;
+        try {
+            await PoliticaInternaManager.delete(id);
+            Toast.success('Eliminado', 'El documento fue quitado de la biblioteca.');
+            await this.renderPoliticasInternas();
+        } catch (err) {
+            console.error(err);
+            Toast.error('Error', err.message || 'No se pudo eliminar.');
+        }
     }
 
     static _cachedDocs = [];
@@ -2259,6 +2493,13 @@ class App {
     // ========================================================
     static async renderGestionarSolicitudes() {
         const user = AuthManager.getUser();
+        if (!user || (!AuthManager.isAdmin() && user.rol !== 'encargado')) {
+            document.getElementById('contentArea').innerHTML = `
+                <div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Solo administradores y encargados de área pueden gestionar solicitudes.</p>
+                <button type="button" class="btn btn-primary" onclick="App.navigate('dashboard')">Ir al inicio</button></div>`;
+            return;
+        }
+
         let requests;
         if (AuthManager.isAdmin()) {
             requests = await RequestManager.getAll();
@@ -2286,6 +2527,17 @@ class App {
 
         const nPend = requests.filter(r => RequestManager.necesitaMiAprobacion(r, user)).length;
 
+        const empMap = new Map();
+        for (const r of requests) {
+            if (r.solicitante) {
+                empMap.set(r.solicitante, r.solicitanteNombre || '');
+            }
+        }
+        const empOptions = [...empMap.entries()]
+            .sort((a, b) => (a[1] || '').localeCompare(b[1] || '', 'es', { sensitivity: 'base' }))
+            .map(([id, nombre]) => `<option value="${App.escapeHtml(id)}">${App.escapeHtml(nombre || id)}</option>`)
+            .join('');
+
         const content = document.getElementById('contentArea');
         content.innerHTML = `
             <div class="card">
@@ -2293,11 +2545,19 @@ class App {
                     <h3><i class="fas fa-tasks" style="margin-right:8px;color:var(--primary);"></i>Gestionar Solicitudes</h3>
                 </div>
                 <div class="card-body">
+                    <div class="form-group" style="margin-bottom:16px;max-width:min(100%, 420px);">
+                        <label for="mgrEmployeeFilter"><i class="fas fa-user" style="margin-right:6px;color:var(--primary);"></i>Empleado</label>
+                        <select id="mgrEmployeeFilter" class="form-control" onchange="App.applyMgrRequestFilters()">
+                            <option value="">Todos los empleados</option>
+                            ${empOptions}
+                        </select>
+                        <small style="display:block;margin-top:6px;color:var(--text-secondary);font-size:0.8rem;">Muestre todas las solicitudes visibles de una persona (según su rol y departamentos).</small>
+                    </div>
                     <div class="tabs" id="mgrTabs">
-                        <button class="tab active" data-tab="pendiente" onclick="App.filterMgrRequests('pendiente')">Pendientes (${nPend})</button>
-                        <button class="tab" data-tab="todas" onclick="App.filterMgrRequests('todas')">Todas (${requests.length})</button>
-                        <button class="tab" data-tab="aprobada" onclick="App.filterMgrRequests('aprobada')">Aprobadas (${requests.filter(r=>r.estado==='aprobada').length})</button>
-                        <button class="tab" data-tab="rechazada" onclick="App.filterMgrRequests('rechazada')">Rechazadas (${requests.filter(r=>r.estado==='rechazada').length})</button>
+                        <button class="tab active" data-tab="pendiente" onclick="App.filterMgrRequests('pendiente')">Pendientes <span class="mgr-tab-n" data-mgr-tab="pendiente">(${nPend})</span></button>
+                        <button class="tab" data-tab="todas" onclick="App.filterMgrRequests('todas')">Todas <span class="mgr-tab-n" data-mgr-tab="todas">(${requests.length})</span></button>
+                        <button class="tab" data-tab="aprobada" onclick="App.filterMgrRequests('aprobada')">Aprobadas <span class="mgr-tab-n" data-mgr-tab="aprobada">(${requests.filter(r=>r.estado==='aprobada').length})</span></button>
+                        <button class="tab" data-tab="rechazada" onclick="App.filterMgrRequests('rechazada')">Rechazadas <span class="mgr-tab-n" data-mgr-tab="rechazada">(${requests.filter(r=>r.estado==='rechazada').length})</span></button>
                     </div>
                     <div id="mgrReqContainer">${this.renderManageRequestList(requests.filter(r => RequestManager.necesitaMiAprobacion(r, user)))}</div>
                 </div>
@@ -2445,14 +2705,49 @@ ${texto}</pre>
     static filterMgrRequests(status) {
         document.querySelectorAll('#mgrTabs .tab').forEach(t => t.classList.remove('active'));
         document.querySelector(`#mgrTabs .tab[data-tab="${status}"]`)?.classList.add('active');
+        this.applyMgrRequestFilters();
+    }
+
+    /** Recalcula los números de las pestañas según el empleado seleccionado (o todos). */
+    static updateMgrTabCounts() {
         const user = AuthManager.getUser();
-        let requests = this._cachedMgrRequests;
-        if (status === 'pendiente') {
-            requests = requests.filter(r => RequestManager.necesitaMiAprobacion(r, user));
-        } else if (status !== 'todas') {
-            requests = requests.filter(r => r.estado === status);
+        let base = this._cachedMgrRequests;
+        const empId = document.getElementById('mgrEmployeeFilter')?.value?.trim() || '';
+        if (empId) {
+            base = base.filter(r => r.solicitante === empId);
         }
-        document.getElementById('mgrReqContainer').innerHTML = this.renderManageRequestList(requests);
+        const nPend = base.filter(r => RequestManager.necesitaMiAprobacion(r, user)).length;
+        const nTodas = base.length;
+        const nAprob = base.filter(r => r.estado === 'aprobada').length;
+        const nRech = base.filter(r => r.estado === 'rechazada').length;
+        const map = { pendiente: nPend, todas: nTodas, aprobada: nAprob, rechazada: nRech };
+        document.querySelectorAll('#mgrTabs .mgr-tab-n[data-mgr-tab]').forEach(span => {
+            const key = span.getAttribute('data-mgr-tab');
+            if (key != null && Object.prototype.hasOwnProperty.call(map, key)) {
+                span.textContent = `(${map[key]})`;
+            }
+        });
+    }
+
+    /** Aplica pestaña activa + filtro por empleado (select #mgrEmployeeFilter). */
+    static applyMgrRequestFilters() {
+        this.updateMgrTabCounts();
+        const user = AuthManager.getUser();
+        let list = this._cachedMgrRequests;
+        const empId = document.getElementById('mgrEmployeeFilter')?.value?.trim() || '';
+        if (empId) {
+            list = list.filter(r => r.solicitante === empId);
+        }
+        const tab = document.querySelector('#mgrTabs .tab.active')?.dataset.tab || 'pendiente';
+        if (tab === 'pendiente') {
+            list = list.filter(r => RequestManager.necesitaMiAprobacion(r, user));
+        } else if (tab !== 'todas') {
+            list = list.filter(r => r.estado === tab);
+        }
+        const container = document.getElementById('mgrReqContainer');
+        if (container) {
+            container.innerHTML = this.renderManageRequestList(list);
+        }
     }
 
     static handleApproveRequest(id) {
