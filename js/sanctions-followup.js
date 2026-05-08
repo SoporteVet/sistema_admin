@@ -98,6 +98,14 @@ class SanctionFollowupManager {
         };
 
         await newRef.set(ticket);
+        try {
+            await dbRef.sanctionFollowupsByCreator.child(user.id).child(ticketId).set(true);
+        } catch (e) {
+            try {
+                await newRef.remove();
+            } catch (_) { /* noop */ }
+            throw e;
+        }
         await this.syncVisibilityIndex(ticketId, visiblesPara, null);
         return { id: ticketId, ...ticket };
     }
@@ -152,6 +160,11 @@ class SanctionFollowupManager {
         if (!this.puedeEditar(prev)) throw new Error('Sin permiso para eliminar');
 
         await this.syncVisibilityIndex(id, {}, prev.visiblesPara || {});
+        try {
+            await dbRef.sanctionFollowupsByCreator.child(prev.creadoPor).child(id).remove();
+        } catch (e) {
+            console.warn('sanctionFollowupsByCreator cleanup:', e);
+        }
         await dbRef.sanctionFollowups.child(id).remove();
         return true;
     }
@@ -167,8 +180,15 @@ class SanctionFollowupManager {
                 return this._sortByFechaDesc(snapshotToArray(snapshot));
             }
 
-            const snapshot = await dbRef.sanctionFollowups.orderByChild('creadoPor').equalTo(user.id).once('value');
-            return this._sortByFechaDesc(snapshotToArray(snapshot));
+            /** Índice por creador: evita queries orderByChild que RTDB suele denegar con reglas por ticket. */
+            const idxSnap = await dbRef.sanctionFollowupsByCreator.child(user.id).once('value');
+            const ids = Object.keys(idxSnap.val() || {});
+            const tickets = [];
+            for (const tid of ids) {
+                const t = await this.getById(tid);
+                if (t && t.estado !== undefined) tickets.push(t);
+            }
+            return this._sortByFechaDesc(tickets);
         } catch (e) {
             console.error('listForManager:', e);
             return [];

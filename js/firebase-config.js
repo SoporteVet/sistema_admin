@@ -34,6 +34,7 @@ const dbRef = {
     counters: db.ref('counters'),
     departamentos: db.ref('departamentos'),
     sanctionFollowups: db.ref('sanctionFollowups'),
+    sanctionFollowupsByCreator: db.ref('sanctionFollowupsByCreator'),
     sanctionFollowupsIndex: db.ref('sanctionFollowupsIndex'),
     politicasInternas: db.ref('politicasInternas'),
     politicasInternasFiles: db.ref('politicasInternasFiles')
