@@ -16,6 +16,13 @@ const SOLICITUD_HORAS_EXTRA_CONFIG = {
     tipo: 'horas_extraordinarias'
 };
 
+/** Departamentos en el flujo de quejas/sanciones: Encargado → TI → RRHH → Gerencia */
+const SANCTION_FOLLOWUP_DEPT = {
+    TI: 'TI-500',
+    RRHH: 'RH-300',
+    GERENCIA: 'DG-100'
+};
+
 /** Valor guardado en doc.para: firmantes = empleados de todos los deptos que el encargado gestiona */
 const DOC_PARA_ENCARGADO_TODAS_AREAS = '__ENC_MIS_AREAS__';
 

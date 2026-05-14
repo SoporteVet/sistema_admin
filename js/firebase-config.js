@@ -36,8 +36,15 @@ const dbRef = {
     sanctionFollowups: db.ref('sanctionFollowups'),
     sanctionFollowupsByCreator: db.ref('sanctionFollowupsByCreator'),
     sanctionFollowupsIndex: db.ref('sanctionFollowupsIndex'),
+    sanctionFollowupsTiReview: db.ref('sanctionFollowupsTiReview'),
+    sanctionFollowupsRrhh: db.ref('sanctionFollowupsRrhh'),
+    sanctionFollowupsQueueTi: db.ref('sanctionFollowupsQueueTi'),
+    sanctionFollowupsQueueRrhh: db.ref('sanctionFollowupsQueueRrhh'),
+    sanctionFollowupsQueueGg: db.ref('sanctionFollowupsQueueGg'),
     politicasInternas: db.ref('politicasInternas'),
-    politicasInternasFiles: db.ref('politicasInternasFiles')
+    politicasInternasFiles: db.ref('politicasInternasFiles'),
+    expedientesEmpleado: db.ref('expedientesEmpleado'),
+    expedientesEmpleadoFiles: db.ref('expedientesEmpleadoFiles')
 };
 
 console.log('🔥 Firebase inicializado correctamente');

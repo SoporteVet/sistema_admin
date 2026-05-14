@@ -205,6 +205,8 @@ class App {
                 case 'crear-documento': await this.renderCrearDocumento(); break;
                 case 'documentos': await this.renderDocumentos(); break;
                 case 'politicas-internas': await this.renderPoliticasInternas(); break;
+                case 'expedientes-digitales': await this.renderExpedientesDigitales(); break;
+                case 'expediente-empleado': await this.renderExpedienteEmpleado(params.userId); break;
                 case 'ver-documento': await this.renderVerDocumento(params.id); break;
                 case 'solicitudes': await this.renderSolicitudes(); break;
                 case 'nueva-solicitud': this.renderNuevaSolicitud(); break;
@@ -236,6 +238,9 @@ class App {
         if (view === 'seguimiento-sanciones-detalle') {
             navView = App._sanctionDetalleSource === 'shared' ? 'seguimiento-compartidos' : 'seguimiento-sanciones';
         }
+        if (view === 'expediente-empleado') {
+            navView = 'expedientes-digitales';
+        }
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.toggle('active', item.dataset.view === navView);
         });
@@ -247,6 +252,8 @@ class App {
             'crear-documento': { title: 'Crear Documento', desc: 'Nuevo comunicado oficial' },
             'documentos': { title: 'Documentos', desc: 'Gestión de documentos por departamento' },
             'politicas-internas': { title: 'Biblioteca / Políticas internas', desc: 'PDFs corporativos para consulta y descarga' },
+            'expedientes-digitales': { title: 'Expediente digital', desc: 'Currículum, avisos y registro por usuario (solo administración)' },
+            'expediente-empleado': { title: 'Expediente del usuario', desc: 'Documentación y registros asociados a la persona' },
             'ver-documento': { title: 'Ver Documento', desc: 'Detalle del documento' },
             'solicitudes': { title: 'Mis Solicitudes', desc: 'Vacaciones y permisos' },
             'nueva-solicitud': { title: 'Nueva Solicitud', desc: 'Solicitar vacaciones o permisos' },
@@ -254,9 +261,9 @@ class App {
             'estado-firmas': { title: 'Estado de Firmas', desc: 'Ver quién ha firmado y quién no' },
             'usuarios': { title: 'Usuarios', desc: 'Administración de usuarios' },
             'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' },
-            'seguimiento-sanciones': { title: 'Seguimiento de sanciones o quejas', desc: 'Tickets internos — en espera o terminado' },
+            'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Flujo: Encargado → TI → RRHH → Gerencia' },
             'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
-            'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto y estado del ticket' }
+            'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' }
         };
         const info = titles[view] || titles['dashboard'];
         document.getElementById('pageTitle').textContent = info.title;
@@ -290,7 +297,7 @@ class App {
         if (!nav || typeof SanctionFollowupManager === 'undefined') return;
         try {
             const list = await SanctionFollowupManager.listSharedWithMe();
-            const pend = list.filter(t => t.estado === SanctionFollowupManager.ESTADO_ESPERA).length;
+            const pend = list.filter((t) => App._sanctionTicketAbierto(t)).length;
             if (list.length > 0) {
                 nav.style.display = 'flex';
                 if (badge) {
@@ -460,13 +467,14 @@ class App {
                     </div>
                     <div class="card-body no-padding">
                         <div style="padding:12px;">
-                            ${sharedSanctions.slice(0, 5).map(t => {
-                                const pend = t.estado === SanctionFollowupManager.ESTADO_ESPERA;
+                            ${sharedSanctions.slice(0, 5).map((t) => {
+                                const pend = App._sanctionTicketAbierto(t);
+                                const idJs = App.escapeJsString(t.id);
                                 return `
-                                <div class="request-card ${pend ? 'status-pendiente' : ''}" style="cursor:pointer;margin-bottom:8px;" onclick="App.openSanctionDetalle('${t.id}','shared')">
+                                <div class="request-card ${pend ? 'status-pendiente' : ''}" style="cursor:pointer;margin-bottom:8px;" onclick="App.openSanctionDetalle('${idJs}','shared')">
                                     <div class="request-header">
                                         <h4>${App.escapeHtml(t.titulo || 'Sin título')}</h4>
-                                        <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(t.estado)}</span>
+                                        <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${App.escapeHtml(SanctionFollowupManager.ticketTieneFlujoEtapa(t) ? SanctionFollowupManager.etiquetaFlujo(t.flujoEtapa) : SanctionFollowupManager.etiquetaEstado(t.estado))}</span>
                                     </div>
                                     <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:6px;">Por ${App.escapeHtml(t.creadoPorNombre || '')} · ${formatDateTime(t.fechaCreacion)}</p>
                                 </div>`;
@@ -881,6 +889,7 @@ class App {
     // BIBLIOTECA / POLÍTICAS INTERNAS (PDF en RTDB, Base64)
     // ========================================================
     static _cachedPoliticas = [];
+    static _cachedExpedientesUsers = [];
 
     static renderPoliticasInternasListHtml(politicas, isAdmin) {
         if (!politicas || politicas.length === 0) {
@@ -1012,6 +1021,356 @@ class App {
                 </div>
             </div>
         `;
+    }
+
+    // ========================================================
+    // EXPEDIENTE DIGITAL (ADMIN)
+    // ========================================================
+
+    static etiquetaTipoRegistroExpediente(tipo) {
+        const m = {
+            aviso: 'Aviso al empleado',
+            amonestacion: 'Amonestación',
+            nota: 'Nota interna',
+            otro: 'Otro'
+        };
+        return m[tipo] || tipo || '—';
+    }
+
+    static renderExpedientesDigitalesRows(users) {
+        if (!users || users.length === 0) {
+            return '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);">No hay usuarios que coincidan con el filtro</td></tr>';
+        }
+        return users.map((u) => {
+            const dep = App._depsMap[u.departamento]?.nombre || u.departamento || '—';
+            const nome = App.escapeHtml(`${u.nombre || ''} ${u.apellido || ''}`.trim());
+            const uidAttr = App.escapeHtml(u.id);
+            const rolNombre = App.escapeHtml(ROLES[u.rol]?.nombre || u.rol || '—');
+            const activo = u.activo
+                ? '<span class="status-badge aprobada"><i class="fas fa-check"></i> Activo</span>'
+                : '<span class="status-badge pendiente"><i class="fas fa-ban"></i> Inactivo</span>';
+            return `<tr>
+                <td><strong>${nome}</strong><div style="font-size:0.85rem;color:var(--text-secondary);">${App.escapeHtml(u.email || '')}</div></td>
+                <td><span class="role-badge ${u.rol || ''}">${rolNombre}</span></td>
+                <td>${App.escapeHtml(dep)}</td>
+                <td>${activo}</td>
+                <td><button type="button" class="btn btn-sm btn-primary" onclick="App.navigate('expediente-empleado', { userId: '${uidAttr}' })"><i class="fas fa-id-card"></i> Expediente</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    static filterExpedientesDigitales() {
+        const q = (document.getElementById('expedSearchInput')?.value || '').trim().toLowerCase();
+        const dep = document.getElementById('expedDepFilter')?.value || '';
+        const base = App._cachedExpedientesUsers || [];
+        let list = [...base];
+        if (dep) list = list.filter((u) => u.departamento === dep);
+        if (q) {
+            list = list.filter((u) => {
+                const rolTxt = (ROLES[u.rol]?.nombre || u.rol || '').toLowerCase();
+                const hay = `${u.nombre || ''} ${u.apellido || ''} ${u.email || ''} ${u.departamento || ''} ${rolTxt}`.toLowerCase();
+                return hay.includes(q);
+            });
+        }
+        list.sort((a, b) => `${a.apellido || ''} ${a.nombre || ''}`.localeCompare(`${b.apellido || ''} ${b.nombre || ''}`, 'es'));
+        const tb = document.getElementById('expedientesTableBody');
+        if (tb) tb.innerHTML = App.renderExpedientesDigitalesRows(list);
+    }
+
+    static async renderExpedientesDigitales() {
+        const content = document.getElementById('contentArea');
+        if (!AuthManager.isAdmin()) {
+            content.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Solo administradores pueden ver expedientes digitales.</p></div>';
+            return;
+        }
+        await this.ensureDepsLoaded();
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header"><h3><i class="fas fa-id-card-alt" style="margin-right:8px;color:var(--primary);"></i>Expediente digital</h3></div>
+                <div class="card-body" style="text-align:center;padding:40px;">
+                    <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:var(--primary);"></i>
+                    <p style="margin-top:16px;color:var(--text-secondary);">Cargando…</p>
+                </div>
+            </div>`;
+        try {
+            const users = await AuthManager.getAllUsers();
+            this._cachedExpedientesUsers = users || [];
+            const todosUsuarios = [...(users || [])].sort((a, b) =>
+                `${a.apellido || ''} ${a.nombre || ''}`.localeCompare(`${b.apellido || ''} ${b.nombre || ''}`, 'es'));
+            let depFilterHtml = '<option value="">Todos los departamentos</option>';
+            Object.keys(App._depsMap).forEach((key) => {
+                depFilterHtml += `<option value="${App.escapeHtml(key)}">${App.escapeHtml(App._depsMap[key].nombre)}</option>`;
+            });
+            content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-id-card-alt" style="margin-right:8px;color:var(--primary);"></i>Expediente digital</h3>
+                </div>
+                <div class="card-body no-padding">
+                    <p style="padding:16px 16px 0;color:var(--text-secondary);font-size:0.9rem;">
+                        Listado de <strong>todos los usuarios</strong> del sistema (cualquier rol). Solo los <strong>administradores</strong> pueden abrir y editar cada expediente.
+                        Puede registrar el <strong>currículum</strong> (PDF), <strong>anotaciones</strong> (avisos, amonestaciones, notas) y ver los
+                        <strong>documentos oficiales</strong> donde esa persona figure como firmante requerido.
+                    </p>
+                    <div class="filters-bar" style="padding:16px 16px 0 16px;">
+                        <div class="search-input">
+                            <i class="fas fa-search"></i>
+                            <input type="text" placeholder="Buscar por nombre, correo, rol o departamento…" id="expedSearchInput" oninput="App.filterExpedientesDigitales()">
+                        </div>
+                        <select class="filter-select" id="expedDepFilter" onchange="App.filterExpedientesDigitales()">${depFilterHtml}</select>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Usuario</th><th>Rol</th><th>Departamento</th><th>Estado</th><th>Acciones</th></tr></thead>
+                            <tbody id="expedientesTableBody">${this.renderExpedientesDigitalesRows(todosUsuarios)}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+        } catch (e) {
+            console.error(e);
+            content.innerHTML = `
+                <div class="card"><div class="card-body">
+                    <div class="empty-state">
+                        <i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i>
+                        <h3>Error</h3>
+                        <p>${App.escapeHtml(e.message || 'No se pudo cargar el listado')}</p>
+                        <button type="button" class="btn btn-primary" onclick="App.navigate('expedientes-digitales')">Reintentar</button>
+                    </div>
+                </div></div>`;
+        }
+    }
+
+    static async openExpedienteCurriculumPdf(uid) {
+        try {
+            const { blob, nombreArchivo } = await ExpedienteEmpleadoManager.getPdfBlob(uid);
+            const url = URL.createObjectURL(blob);
+            const w = window.open(url, '_blank');
+            if (!w) Toast.error('Ventana bloqueada', 'Permita ventanas emergentes para ver el PDF.');
+            setTimeout(() => URL.revokeObjectURL(url), 120000);
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo abrir el PDF');
+        }
+    }
+
+    static async confirmDeleteExpedienteCurriculum(uid) {
+        if (!confirm('¿Eliminar el currículum PDF de este expediente? Esta acción no se puede deshacer.')) return;
+        try {
+            await ExpedienteEmpleadoManager.eliminarCurriculum(uid);
+            Toast.success('Eliminado', 'Currículum eliminado del expediente.');
+            await App.renderExpedienteEmpleado(uid);
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo eliminar');
+        }
+    }
+
+    static async handleExpedienteCurriculumUpload(uid) {
+        const inp = document.getElementById('expedCurrFile');
+        const file = inp?.files?.[0];
+        if (!file) {
+            Toast.error('Archivo', 'Seleccione un archivo PDF');
+            return;
+        }
+        const btn = document.getElementById('btnExpedCurrUpload');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Subiendo…';
+        }
+        try {
+            await ExpedienteEmpleadoManager.subirCurriculum(uid, file);
+            if (inp) inp.value = '';
+            Toast.success('Guardado', 'Currículum actualizado.');
+            await App.renderExpedienteEmpleado(uid);
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo subir');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-upload"></i> Subir o reemplazar PDF';
+            }
+        }
+    }
+
+    static async handleExpedienteRegistroSubmit(e, uid) {
+        e.preventDefault();
+        const tipo = document.getElementById('expRegTipo')?.value;
+        const titulo = document.getElementById('expRegTitulo')?.value;
+        const detalle = document.getElementById('expRegDetalle')?.value;
+        const btn = document.getElementById('btnExpRegSubmit');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando…';
+        }
+        try {
+            await ExpedienteEmpleadoManager.agregarRegistro(uid, { tipo, titulo, detalle });
+            Toast.success('Registro creado', 'La anotación quedó en el expediente.');
+            await App.renderExpedienteEmpleado(uid);
+        } catch (err) {
+            Toast.error('Error', err.message || 'No se pudo guardar');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-save"></i> Guardar registro';
+            }
+        }
+    }
+
+    static async deleteExpedienteRegistro(uid, registroId) {
+        if (!confirm('¿Eliminar este registro del expediente?')) return;
+        try {
+            await ExpedienteEmpleadoManager.eliminarRegistro(uid, registroId);
+            Toast.success('Eliminado', 'Registro eliminado.');
+            await App.renderExpedienteEmpleado(uid);
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo eliminar');
+        }
+    }
+
+    static async renderExpedienteEmpleado(userId) {
+        const content = document.getElementById('contentArea');
+        if (!AuthManager.isAdmin()) {
+            content.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Solo administradores.</p></div>';
+            return;
+        }
+        if (!userId) {
+            content.innerHTML = '<div class="empty-state"><h3>Usuario no especificado</h3><button type="button" class="btn btn-primary" onclick="App.navigate(\'expedientes-digitales\')">Volver al listado</button></div>';
+            return;
+        }
+        await this.ensureDepsLoaded();
+        content.innerHTML = `
+            <div class="card"><div class="card-body" style="text-align:center;padding:40px;">
+                <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:var(--primary);"></i>
+                <p style="margin-top:16px;">Cargando expediente…</p>
+            </div></div>`;
+        try {
+            const users = await AuthManager.getAllUsers();
+            const emp = (users || []).find((u) => u.id === userId);
+            if (!emp) {
+                content.innerHTML = `
+                    <div class="empty-state">
+                        <h3>Usuario no encontrado</h3>
+                        <p>No existe un usuario con ese identificador en el sistema.</p>
+                        <button type="button" class="btn btn-primary" onclick="App.navigate('expedientes-digitales')">Volver al listado</button>
+                    </div>`;
+                return;
+            }
+            const [resumen, docsFirma] = await Promise.all([
+                ExpedienteEmpleadoManager.getResumenParaUsuario(userId),
+                DocumentManager.getActivosRequiriendoFirmaDe(userId)
+            ]);
+            const nome = App.escapeHtml(`${emp.nombre || ''} ${emp.apellido || ''}`.trim());
+            const dep = App.escapeHtml(App._depsMap[emp.departamento]?.nombre || emp.departamento || '—');
+            const uidJs = App.escapeJsString(userId);
+
+            const curriculumInner = resumen.curriculum
+                ? `<p style="margin-bottom:10px;"><strong>${App.escapeHtml(resumen.curriculum.nombreArchivo || 'PDF')}</strong><br>
+                    <span style="font-size:0.85rem;color:var(--text-secondary);">Actualizado: ${App.escapeHtml(resumen.curriculum.fechaActualizacion || '')}</span></p>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="App.openExpedienteCurriculumPdf('${uidJs}')"><i class="fas fa-eye"></i> Ver PDF</button>
+                        <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.confirmDeleteExpedienteCurriculum('${uidJs}')"><i class="fas fa-trash-alt"></i> Quitar PDF</button>
+                    </div>`
+                : '<p style="color:var(--text-secondary);">Sin currículum cargado.</p>';
+
+            const docsRows = docsFirma.length === 0
+                ? '<tr><td colspan="4" style="text-align:center;color:var(--text-secondary);">Ningún documento activo requiere firma de este usuario</td></tr>'
+                : docsFirma.map((d) => `
+                    <tr>
+                        <td>${App.escapeHtml(d.codigo || '')}</td>
+                        <td>${App.escapeHtml(d.titulo || '')}</td>
+                        <td>${App.escapeHtml(d.fechaCreacion || '')}</td>
+                        <td><button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('ver-documento', { id: '${App.escapeHtml(d.id)}' })"><i class="fas fa-file-alt"></i> Ver</button></td>
+                    </tr>`).join('');
+
+            const registrosRows = (resumen.registros || []).length === 0
+                ? '<tr><td colspan="5" style="text-align:center;color:var(--text-secondary);">Sin registros todavía</td></tr>'
+                : resumen.registros.map((r) => {
+                    const tipoLabel = App.etiquetaTipoRegistroExpediente(r.tipo);
+                    return `<tr>
+                        <td><span class="status-badge ${r.tipo === 'amonestacion' ? 'pendiente' : 'aprobada'}">${App.escapeHtml(tipoLabel)}</span></td>
+                        <td>${App.escapeHtml(r.titulo || '')}</td>
+                        <td style="max-width:280px;font-size:0.9rem;color:var(--text-secondary);">${App.escapeHtml(r.detalle || '')}</td>
+                        <td>${App.escapeHtml(r.fecha || '')}</td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);"
+                                onclick="App.deleteExpedienteRegistro('${uidJs}','${App.escapeJsString(r.id)}')"><i class="fas fa-times"></i></button>
+                        </td>
+                    </tr>`;
+                }).join('');
+
+            content.innerHTML = `
+            <div style="margin-bottom:16px;">
+                <button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('expedientes-digitales')"><i class="fas fa-arrow-left"></i> Volver al listado</button>
+            </div>
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                    <h3><i class="fas fa-user" style="margin-right:8px;color:var(--primary);"></i>${nome}</h3>
+                    <span style="font-size:0.9rem;color:var(--text-secondary);">${dep}</span>
+                </div>
+                <div class="card-body">
+                    <p style="margin-bottom:8px;"><span class="role-badge ${emp.rol || ''}">${App.escapeHtml(ROLES[emp.rol]?.nombre || emp.rol || '—')}</span></p>
+                    <p style="color:var(--text-secondary);font-size:0.9rem;">Expediente digital — documentación y anotaciones internas asociadas a esta persona (solo visible para administradores).</p>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3 style="font-size:1.05rem;"><i class="fas fa-file-pdf" style="margin-right:8px;color:var(--primary);"></i>Currículum vitae (PDF)</h3></div>
+                <div class="card-body">
+                    ${curriculumInner}
+                    <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);">
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">Máximo 4 MB. Reemplaza el archivo anterior si ya había uno.</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+                        <input type="file" id="expedCurrFile" accept=".pdf,application/pdf">
+                        <button type="button" class="btn btn-primary btn-sm" id="btnExpedCurrUpload" onclick="App.handleExpedienteCurriculumUpload('${uidJs}')"><i class="fas fa-upload"></i> Subir o reemplazar PDF</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3 style="font-size:1.05rem;"><i class="fas fa-file-signature" style="margin-right:8px;color:var(--primary);"></i>Documentos con firma requerida</h3></div>
+                <div class="card-body no-padding">
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Código</th><th>Título</th><th>Fecha</th><th></th></tr></thead>
+                            <tbody>${docsRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3 style="font-size:1.05rem;"><i class="fas fa-clipboard-list" style="margin-right:8px;color:var(--primary);"></i>Avisos, amonestaciones y notas</h3></div>
+                <div class="card-body">
+                    <form onsubmit="App.handleExpedienteRegistroSubmit(event, '${uidJs}')" style="margin-bottom:20px;padding:16px;background:var(--bg-secondary);border-radius:8px;">
+                        <h4 style="margin:0 0 12px;font-size:0.95rem;">Nuevo registro</h4>
+                        <div class="form-group">
+                            <label>Tipo</label>
+                            <select id="expRegTipo" class="form-control" required>
+                                <option value="aviso">Aviso al empleado</option>
+                                <option value="amonestacion">Amonestación</option>
+                                <option value="nota">Nota interna</option>
+                                <option value="otro">Otro</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Título</label>
+                            <input type="text" id="expRegTitulo" class="form-control" required maxlength="300" placeholder="Resumen breve">
+                        </div>
+                        <div class="form-group">
+                            <label>Detalle</label>
+                            <textarea id="expRegDetalle" class="form-control" rows="4" required maxlength="10000" placeholder="Descripción o contenido del registro"></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-sm" id="btnExpRegSubmit"><i class="fas fa-save"></i> Guardar registro</button>
+                    </form>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Tipo</th><th>Título</th><th>Detalle</th><th>Fecha</th><th></th></tr></thead>
+                            <tbody>${registrosRows}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+        } catch (e) {
+            console.error(e);
+            content.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${App.escapeHtml(e.message || 'Error al cargar')}</p><button type="button" class="btn btn-primary" onclick="App.navigate('expedientes-digitales')">Volver</button></div>`;
+        }
     }
 
     static async handlePoliticaUpload(e) {
@@ -3128,6 +3487,16 @@ ${texto}</pre>
     // SEGUIMIENTO DE SANCIONES / QUEJAS
     // ========================================================
     static _cachedSanctionTickets = [];
+    static _sanctionMainTab = '';
+    static _sanctionSubTab = 'todas';
+
+    static _sanctionTicketAbierto(t) {
+        if (!t) return false;
+        if (SanctionFollowupManager.ticketTieneFlujoEtapa(t)) {
+            return t.flujoEtapa !== SanctionFollowupManager.FLUJO_CERRADO;
+        }
+        return t.estado !== SanctionFollowupManager.ESTADO_TERMINADO;
+    }
 
     static openSanctionDetalle(id, source) {
         App._sanctionDetalleSource = source === 'shared' ? 'shared' : 'manager';
@@ -3136,49 +3505,106 @@ ${texto}</pre>
 
     static async renderSeguimientoSanciones() {
         const user = AuthManager.getUser();
-        if (!user || (!AuthManager.isAdmin() && user.rol !== 'encargado')) {
+        if (!user) {
+            document.getElementById('contentArea').innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>Sesión</h3><p>Inicie sesión.</p></div>`;
+            return;
+        }
+
+        const d = SANCTION_FOLLOWUP_DEPT;
+        const isAdmin = AuthManager.isAdmin();
+        const isEnc = user.rol === 'encargado' || isAdmin;
+        const deptTi = AuthManager.usuarioEnDepartamento(user, d.TI);
+        const deptRh = AuthManager.usuarioEnDepartamento(user, d.RRHH);
+        const deptGg = AuthManager.usuarioEnDepartamento(user, d.GERENCIA);
+
+        if (!isEnc && !deptTi && !deptRh && !deptGg) {
             document.getElementById('contentArea').innerHTML = `
-                <div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Solo administradores y encargados de área pueden gestionar este módulo.</p>
+                <div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Este módulo es para encargados de área (crear casos) o personal de TI, Recursos Humanos o Gerencia General (colas de revisión).</p>
                 <button type="button" class="btn btn-primary" onclick="App.navigate('dashboard')">Ir al inicio</button></div>`;
             return;
         }
 
-        const tickets = await SanctionFollowupManager.listForManager();
-        this._cachedSanctionTickets = tickets;
-        const nEsp = tickets.filter(t => t.estado === SanctionFollowupManager.ESTADO_ESPERA).length;
-        const nTer = tickets.filter(t => t.estado === SanctionFollowupManager.ESTADO_TERMINADO).length;
+        const [misTodos, colaTi, colaRrhh, colaGg] = await Promise.all([
+            (isAdmin || user.rol === 'encargado') ? SanctionFollowupManager.listForManager() : Promise.resolve([]),
+            (isAdmin || deptTi) ? SanctionFollowupManager.listColaTi() : Promise.resolve([]),
+            (isAdmin || deptRh) ? SanctionFollowupManager.listColaRrhh() : Promise.resolve([]),
+            (isAdmin || deptGg) ? SanctionFollowupManager.listColaGerencia() : Promise.resolve([])
+        ]);
+
+        const mis = isAdmin ? misTodos : misTodos;
+        const packs = { mis, cola_ti: colaTi, cola_rrhh: colaRrhh, cola_gg: colaGg, todos: isAdmin ? misTodos : [] };
+
+        const allowedTabs = [];
+        if (user.rol === 'encargado') allowedTabs.push({ key: 'mis', label: 'Mis envíos', list: mis });
+        if (isAdmin || deptTi) allowedTabs.push({ key: 'cola_ti', label: 'Cola TI', list: colaTi });
+        if (isAdmin || deptRh) allowedTabs.push({ key: 'cola_rrhh', label: 'Cola RRHH', list: colaRrhh });
+        if (isAdmin || deptGg) allowedTabs.push({ key: 'cola_gg', label: 'Cola Gerencia', list: colaGg });
+        if (isAdmin) allowedTabs.push({ key: 'todos', label: 'Todos los casos', list: misTodos });
+
+        if (!allowedTabs.find((t) => t.key === this._sanctionMainTab)) {
+            this._sanctionMainTab = allowedTabs[0]?.key || 'cola_ti';
+        }
+
+        const currentPack = packs[this._sanctionMainTab] || [];
+        this._cachedSanctionTickets = currentPack;
+        this._sanctionSubTab = this._sanctionSubTab || 'todas';
+
+        const nAb = currentPack.filter((t) => App._sanctionTicketAbierto(t)).length;
+        const nCe = currentPack.length - nAb;
+
+        const mainTabsHtml = allowedTabs.map((t) => {
+            const active = t.key === this._sanctionMainTab ? 'active' : '';
+            const k = App.escapeJsString(t.key);
+            return `<button type="button" class="tab ${active}" data-main="${t.key}" onclick="App.filterSanctionMainTab('${k}')">${App.escapeHtml(t.label)} (${t.list.length})</button>`;
+        }).join('');
 
         const content = document.getElementById('contentArea');
+        const btnNuevo = (isAdmin || user.rol === 'encargado')
+            ? `<button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionCreateModal()"><i class="fas fa-plus"></i> Nueva queja</button>`
+            : '';
+
         content.innerHTML = `
             <div class="card">
                 <div class="card-header" style="flex-wrap:wrap;gap:12px;">
-                    <h3 style="flex:1;min-width:200px;"><i class="fas fa-gavel" style="margin-right:8px;color:var(--primary);"></i>Seguimiento de sanciones o quejas</h3>
-                    <div class="tabs" id="sanctionMgrTabs" style="flex:2;justify-content:center;">
-                        <button type="button" class="tab active" data-tab="todas" onclick="App.filterSanctionTickets('todas')">Todos (${tickets.length})</button>
-                        <button type="button" class="tab" data-tab="en_espera" onclick="App.filterSanctionTickets('en_espera')">En espera (${nEsp})</button>
-                        <button type="button" class="tab" data-tab="terminado" onclick="App.filterSanctionTickets('terminado')">Terminado (${nTer})</button>
-                    </div>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionCreateModal()"><i class="fas fa-plus"></i> Nuevo ticket</button>
+                    <h3 style="flex:1;min-width:200px;"><i class="fas fa-gavel" style="margin-right:8px;color:var(--primary);"></i>Quejas y sanciones</h3>
+                    ${btnNuevo}
                 </div>
                 <div class="card-body">
-                    <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:16px;">Cada registro es un ticket de texto con estado <strong>En espera</strong> o <strong>Terminado</strong>. Indique qué usuarios pueden leer el caso.</p>
-                    <div id="sanctionMgrListContainer">${this.renderSanctionManagerCards(tickets)}</div>
+                    <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:12px;">
+                        Flujo: <strong>Encargado</strong> registra → <strong>TI</strong> revisa (apartado solo TI) → <strong>RRHH</strong> anota → <strong>Gerencia</strong> cierra y aprueba.
+                    </p>
+                    <div class="tabs" id="sanctionMainTabs" style="flex-wrap:wrap;margin-bottom:10px;">${mainTabsHtml}</div>
+                    <div class="tabs" id="sanctionMgrTabs" style="flex-wrap:wrap;margin-bottom:16px;">
+                        <button type="button" class="tab ${this._sanctionSubTab === 'todas' ? 'active' : ''}" data-tab="todas" onclick="App.filterSanctionTickets('todas')">Todos (${currentPack.length})</button>
+                        <button type="button" class="tab ${this._sanctionSubTab === 'abiertos' ? 'active' : ''}" data-tab="abiertos" onclick="App.filterSanctionTickets('abiertos')">En trámite (${nAb})</button>
+                        <button type="button" class="tab ${this._sanctionSubTab === 'cerrados' ? 'active' : ''}" data-tab="cerrados" onclick="App.filterSanctionTickets('cerrados')">Cerrados (${nCe})</button>
+                    </div>
+                    <div id="sanctionMgrListContainer">${this.renderSanctionManagerCards(currentPack)}</div>
                 </div>
             </div>`;
     }
 
+    static async filterSanctionMainTab(key) {
+        this._sanctionMainTab = key;
+        this._sanctionSubTab = 'todas';
+        await this.renderSeguimientoSanciones();
+    }
+
     static renderSanctionManagerCards(tickets) {
         if (!tickets || tickets.length === 0) {
-            return `<div class="empty-state"><i class="fas fa-inbox"></i><h3>Sin tickets</h3><p>Cree un nuevo seguimiento con el botón superior.</p></div>`;
+            return `<div class="empty-state"><i class="fas fa-inbox"></i><h3>Sin registros</h3><p>No hay casos en esta vista.</p></div>`;
         }
-        return tickets.map(t => {
-            const pend = t.estado === SanctionFollowupManager.ESTADO_ESPERA;
+        return tickets.map((t) => {
+            const abierto = App._sanctionTicketAbierto(t);
             const raw = t.texto || '';
             const excerpt = App.escapeHtml(raw.slice(0, 220)) + (raw.length > 220 ? '…' : '');
-            const puede = SanctionFollowupManager.puedeEditar(t);
+            const flujoLabel = SanctionFollowupManager.ticketTieneFlujoEtapa(t)
+                ? SanctionFollowupManager.etiquetaFlujo(t.flujoEtapa)
+                : (t.estado === SanctionFollowupManager.ESTADO_TERMINADO ? 'Cerrado (hist.)' : 'En proceso (hist.)');
+            const puede = SanctionFollowupManager.puedeEditarCuerpo(t);
             const idJs = App.escapeJsString(t.id);
             return `
-            <div class="request-card ${pend ? 'status-pendiente' : ''}" style="margin-bottom:12px;">
+            <div class="request-card ${abierto ? 'status-pendiente' : ''}" style="margin-bottom:12px;">
                 <div class="request-header">
                     <div>
                         <h4>${App.escapeHtml(t.titulo || 'Sin título')}</h4>
@@ -3187,7 +3613,7 @@ ${texto}</pre>
                             ${t.departamento ? ` · ${App.escapeHtml((App._depsMap[t.departamento] || DEPARTAMENTOS[t.departamento])?.nombre || t.departamento)}` : ''}
                         </p>
                     </div>
-                    <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(t.estado)}</span>
+                    <span class="status-badge ${abierto ? 'pendiente' : 'aprobada'}"><i class="fas fa-${abierto ? 'clock' : 'check'}"></i> ${App.escapeHtml(flujoLabel)}</span>
                 </div>
                 <p style="font-size:0.88rem;color:var(--text-secondary);white-space:pre-wrap;margin-top:10px;">${excerpt}</p>
                 <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
@@ -3199,11 +3625,11 @@ ${texto}</pre>
     }
 
     static filterSanctionTickets(tab) {
-        document.querySelectorAll('#sanctionMgrTabs .tab').forEach(el => el.classList.remove('active'));
-        document.querySelector(`#sanctionMgrTabs .tab[data-tab="${tab}"]`)?.classList.add('active');
+        this._sanctionSubTab = tab;
+        document.querySelectorAll('#sanctionMgrTabs .tab').forEach((el) => el.classList.toggle('active', el.dataset.tab === tab));
         let list = this._cachedSanctionTickets || [];
-        if (tab === 'en_espera') list = list.filter(t => t.estado === SanctionFollowupManager.ESTADO_ESPERA);
-        else if (tab === 'terminado') list = list.filter(t => t.estado === SanctionFollowupManager.ESTADO_TERMINADO);
+        if (tab === 'abiertos') list = list.filter((t) => App._sanctionTicketAbierto(t));
+        else if (tab === 'cerrados') list = list.filter((t) => !App._sanctionTicketAbierto(t));
         const container = document.getElementById('sanctionMgrListContainer');
         if (container) container.innerHTML = this.renderSanctionManagerCards(list);
     }
@@ -3226,11 +3652,11 @@ ${texto}</pre>
                     <input class="form-control" id="sanctionCreateTitulo" placeholder="Referencia breve" maxlength="280">
                 </div>
                 <div class="form-group">
-                    <label>Texto del ticket <span class="required">*</span></label>
+                    <label>Texto del caso <span class="required">*</span></label>
                     <textarea class="form-control" id="sanctionCreateTexto" rows="8" required placeholder="Descripción del caso..."></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Usuarios que pueden ver este seguimiento</label>
+                    <label>Usuarios que pueden ver el seguimiento (no ven la revisión interna de TI)</label>
                     <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Podrá cambiar esta lista después editando el ticket.</p>
                     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
                         ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
@@ -3253,7 +3679,7 @@ ${texto}</pre>
         const visiblesParaIds = Array.from(boxes).map(b => b.value);
         try {
             await SanctionFollowupManager.create({ titulo, texto, visiblesParaIds });
-            Toast.success('Creado', 'El ticket fue registrado correctamente');
+            Toast.success('Creado', 'El caso fue enviado. Pasará primero a revisión de TI.');
             App.closeModal();
             await App.refreshSanctionSharedNavItem();
             App.navigate('seguimiento-sanciones');
@@ -3264,8 +3690,8 @@ ${texto}</pre>
 
     static async showSanctionEditModal(ticketId) {
         const t = await SanctionFollowupManager.getById(ticketId);
-        if (!t || !SanctionFollowupManager.puedeEditar(t)) {
-            Toast.error('Error', 'No puede editar este ticket');
+        if (!t || !SanctionFollowupManager.puedeEditarCuerpo(t)) {
+            Toast.error('Error', 'No puede editar este caso en esta etapa');
             return;
         }
         const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== t.creadoPor);
@@ -3284,6 +3710,14 @@ ${texto}</pre>
         const eId = App.escapeHtml(ticketId);
         const ev = SanctionFollowupManager.ESTADO_ESPERA;
         const et = SanctionFollowupManager.ESTADO_TERMINADO;
+        const estadoBlock = AuthManager.isAdmin() ? `
+                <div class="form-group">
+                    <label>Estado (histórico)</label>
+                    <select class="form-control" id="sanctionEditEstado">
+                        <option value="${ev}" ${t.estado === ev ? 'selected' : ''}>En espera</option>
+                        <option value="${et}" ${t.estado === et ? 'selected' : ''}>Terminado</option>
+                    </select>
+                </div>` : '';
 
         this.showModal('Editar seguimiento', `
             <form id="sanctionEditForm" data-ticket-id="${eId}" onsubmit="App.submitSanctionEdit(event)">
@@ -3295,13 +3729,7 @@ ${texto}</pre>
                     <label>Texto <span class="required">*</span></label>
                     <textarea class="form-control" id="sanctionEditTexto" rows="8" required>${eTexto}</textarea>
                 </div>
-                <div class="form-group">
-                    <label>Estado</label>
-                    <select class="form-control" id="sanctionEditEstado">
-                        <option value="${ev}" ${t.estado === ev ? 'selected' : ''}>En espera</option>
-                        <option value="${et}" ${t.estado === et ? 'selected' : ''}>Terminado</option>
-                    </select>
-                </div>
+                ${estadoBlock}
                 <div class="form-group">
                     <label>Usuarios que pueden ver este seguimiento</label>
                     <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
@@ -3323,11 +3751,14 @@ ${texto}</pre>
         if (!ticketId) return;
         const titulo = document.getElementById('sanctionEditTitulo')?.value || '';
         const texto = document.getElementById('sanctionEditTexto')?.value || '';
-        const estado = document.getElementById('sanctionEditEstado')?.value;
+        const estadoEl = document.getElementById('sanctionEditEstado');
+        const estado = estadoEl ? estadoEl.value : undefined;
         const boxes = form.querySelectorAll('input[name="sanctionVisible"]:checked');
-        const visiblesParaIds = Array.from(boxes).map(b => b.value);
+        const visiblesParaIds = Array.from(boxes).map((b) => b.value);
+        const patch = { titulo, texto, visiblesParaIds };
+        if (AuthManager.isAdmin() && estado !== undefined) patch.estado = estado;
         try {
-            await SanctionFollowupManager.updateTicket(ticketId, { titulo, texto, estado, visiblesParaIds });
+            await SanctionFollowupManager.updateTicket(ticketId, patch);
             Toast.success('Guardado', 'Los cambios fueron aplicados');
             App.closeModal();
             await App.refreshSanctionSharedNavItem();
@@ -3379,19 +3810,22 @@ ${texto}</pre>
         if (!tickets || tickets.length === 0) {
             return `<div class="empty-state"><i class="fas fa-folder-open"></i><h3>Nada por aquí</h3><p>Aún no hay seguimientos compartidos con su usuario.</p></div>`;
         }
-        return tickets.map(t => {
-            const pend = t.estado === SanctionFollowupManager.ESTADO_ESPERA;
+        return tickets.map((t) => {
+            const abierto = App._sanctionTicketAbierto(t);
             const raw = t.texto || '';
             const excerpt = App.escapeHtml(raw.slice(0, 240)) + (raw.length > 240 ? '…' : '');
             const idJs = App.escapeJsString(t.id);
+            const flujoLabel = SanctionFollowupManager.ticketTieneFlujoEtapa(t)
+                ? SanctionFollowupManager.etiquetaFlujo(t.flujoEtapa)
+                : (t.estado === SanctionFollowupManager.ESTADO_TERMINADO ? 'Cerrado' : 'En proceso');
             return `
-            <div class="request-card ${pend ? 'status-pendiente' : ''}" style="margin-bottom:12px;cursor:pointer;" onclick="App.openSanctionDetalle('${idJs}','shared')">
+            <div class="request-card ${abierto ? 'status-pendiente' : ''}" style="margin-bottom:12px;cursor:pointer;" onclick="App.openSanctionDetalle('${idJs}','shared')">
                 <div class="request-header">
                     <div>
                         <h4>${App.escapeHtml(t.titulo || 'Sin título')}</h4>
                         <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:4px;">${App.escapeHtml(t.creadoPorNombre || '')} · ${formatDateTime(t.fechaCreacion)}</p>
                     </div>
-                    <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(t.estado)}</span>
+                    <span class="status-badge ${abierto ? 'pendiente' : 'aprobada'}"><i class="fas fa-${abierto ? 'clock' : 'check'}"></i> ${App.escapeHtml(flujoLabel)}</span>
                 </div>
                 <p style="font-size:0.88rem;color:var(--text-secondary);white-space:pre-wrap;margin-top:10px;">${excerpt}</p>
             </div>`;
@@ -3411,21 +3845,126 @@ ${texto}</pre>
             return;
         }
 
-        const puedeEditar = SanctionFollowupManager.puedeEditar(ticket);
+        const flujoEtapa = SanctionFollowupManager.getFlujoEtapa(ticket);
+        const flujoLabel = SanctionFollowupManager.etiquetaFlujo(flujoEtapa);
+
+        let tiReview = null;
+        if (SanctionFollowupManager.puedeVerRevisionTi()) {
+            tiReview = await SanctionFollowupManager.getTiReview(id);
+        }
+        let rrhh = null;
+        if (SanctionFollowupManager.puedeVerNotasRrhhGerencia()) {
+            rrhh = await SanctionFollowupManager.getRrhhNotas(id);
+        }
+
+        const puedeEditarCuerpo = SanctionFollowupManager.puedeEditarCuerpo(ticket);
+        const puedeTi = SanctionFollowupManager.puedeMarcarRevisionTi(ticket);
+        const puedeRrhh = SanctionFollowupManager.puedeActuarRrhh(ticket);
+        const puedeGg = SanctionFollowupManager.puedeActuarGerencia(ticket);
         const volver = App._sanctionDetalleSource === 'shared' ? 'seguimiento-compartidos' : 'seguimiento-sanciones';
         const visibles = Object.keys(ticket.visiblesPara || {});
-        let visLine = 'Ningún otro usuario (solo administración y quien creó el ticket)';
+        let visLine = 'Ningún otro usuario además del flujo interno y quien creó el caso';
         if (visibles.length) {
             const all = await AuthManager.getAllUsers();
-            const map = Object.fromEntries(all.map(u => [u.id, u]));
-            visLine = visibles.map(uid => {
+            const map = Object.fromEntries(all.map((u) => [u.id, u]));
+            visLine = visibles.map((uid) => {
                 const u = map[uid];
                 return u ? `${u.nombre} ${u.apellido}` : uid;
             }).join(', ');
         }
 
-        const pend = ticket.estado === SanctionFollowupManager.ESTADO_ESPERA;
         const idJs = App.escapeJsString(id);
+        const abierto = App._sanctionTicketAbierto(ticket);
+        const curUser = AuthManager.getUser();
+        const ocultarTiParaStaffTi = !AuthManager.isAdmin() &&
+            AuthManager.usuarioEnDepartamento(curUser, SANCTION_FOLLOWUP_DEPT.TI) &&
+            (!SanctionFollowupManager.ticketTieneFlujoEtapa(ticket) || ticket.flujoEtapa !== SanctionFollowupManager.FLUJO_PENDIENTE_TI);
+
+        let bloqueTi = '';
+        if (SanctionFollowupManager.puedeVerRevisionTi() && !ocultarTiParaStaffTi) {
+            if (tiReview && tiReview.revisado) {
+                bloqueTi = `
+                    <div class="card" style="margin-top:16px;border-left:4px solid #006064;">
+                        <div class="card-body">
+                            <h4 style="margin:0 0 8px;font-size:1rem;"><i class="fas fa-shield-halved" style="margin-right:8px;color:#006064;"></i>Revisión TI (confidencial)</h4>
+                            <p style="font-size:0.85rem;color:var(--text-secondary);">Marcado el ${formatDateTime(tiReview.fecha || '')}</p>
+                            <div style="white-space:pre-wrap;margin-top:8px;font-size:0.9rem;">${App.escapeHtml(tiReview.notas || '(sin notas)')}</div>
+                        </div>
+                    </div>`;
+            } else if (puedeTi) {
+                bloqueTi = `
+                    <div class="card" style="margin-top:16px;border-left:4px solid #006064;">
+                        <div class="card-body">
+                            <h4 style="margin:0 0 8px;font-size:1rem;"><i class="fas fa-shield-halved" style="margin-right:8px;color:#006064;"></i>Revisión TI — solo su departamento</h4>
+                            <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px;">Marque revisión y envíe el caso a Recursos Humanos.</p>
+                            <div class="form-group">
+                                <label>Notas internas TI</label>
+                                <textarea class="form-control" id="sanctionTiNotas" rows="4" placeholder="Observaciones técnicas o de revisión..."></textarea>
+                            </div>
+                            <button type="button" class="btn btn-primary" onclick="App.submitSanctionTiRevision('${idJs}')"><i class="fas fa-check"></i> Revisado — enviar a RRHH</button>
+                        </div>
+                    </div>`;
+            } else if (flujoEtapa === SanctionFollowupManager.FLUJO_PENDIENTE_TI && SanctionFollowupManager.ticketTieneFlujoEtapa(ticket)) {
+                bloqueTi = `<p style="margin-top:16px;font-size:0.85rem;color:var(--text-secondary);"><i class="fas fa-hourglass-half"></i> Pendiente de revisión por TI.</p>`;
+            }
+        }
+
+        let bloqueRrhh = '';
+        if (SanctionFollowupManager.puedeVerNotasRrhhGerencia()) {
+            const txt = rrhh && rrhh.anotaciones ? App.escapeHtml(rrhh.anotaciones) : '';
+            const puedeEditarRrhh = puedeRrhh;
+            bloqueRrhh = `
+                <div class="card" style="margin-top:16px;border-left:4px solid #e65100;">
+                    <div class="card-body">
+                        <h4 style="margin:0 0 8px;font-size:1rem;"><i class="fas fa-users" style="margin-right:8px;color:#e65100;"></i>Recursos Humanos</h4>
+                        ${rrhh && rrhh.fecha ? `<p style="font-size:0.82rem;color:var(--text-secondary);">Última actualización: ${formatDateTime(rrhh.fecha)}</p>` : ''}
+                        <div class="form-group" style="margin-top:10px;">
+                            <label>Anotaciones (amonestación, medidas, etc.)</label>
+                            <textarea class="form-control" id="sanctionRrhhAnot" rows="6" ${puedeEditarRrhh ? '' : 'readonly'} placeholder="Registre las anotaciones del caso...">${txt}</textarea>
+                        </div>
+                        ${puedeEditarRrhh ? `
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-outline" onclick="App.submitSanctionRrhhGuardar('${idJs}')"><i class="fas fa-save"></i> Guardar anotaciones</button>
+                                <button type="button" class="btn btn-primary" onclick="App.submitSanctionRrhhEnviarGerencia('${idJs}')"><i class="fas fa-arrow-right"></i> Enviar a Gerencia General</button>
+                            </div>` : ''}
+                    </div>
+                </div>`;
+        }
+
+        let bloqueGg = '';
+        if (puedeGg) {
+            bloqueGg = `
+                    <div class="card" style="margin-top:16px;border-left:4px solid #1a237e;">
+                        <div class="card-body">
+                            <h4 style="margin:0 0 8px;font-size:1rem;"><i class="fas fa-building" style="margin-right:8px;color:#1a237e;"></i>Gerencia General — cierre</h4>
+                            <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:10px;">Revise el caso y cierre el expediente.</p>
+                            <div class="form-group">
+                                <label>Comentario de cierre</label>
+                                <textarea class="form-control" id="sanctionGgComent" rows="3" placeholder="Resolución o comentario final..."></textarea>
+                            </div>
+                            <label style="display:flex;align-items:center;gap:8px;margin-bottom:12px;cursor:pointer;">
+                                <input type="checkbox" id="sanctionGgAprueba" checked> <span>Caso aprobado / resuelto favorablemente para el cierre</span>
+                            </label>
+                            <button type="button" class="btn btn-primary" onclick="App.submitSanctionGerenciaCerrar('${idJs}')"><i class="fas fa-flag-checkered"></i> Cerrar expediente</button>
+                        </div>
+                    </div>`;
+        } else if (flujoEtapa === SanctionFollowupManager.FLUJO_CERRADO) {
+            bloqueGg = `
+                    <div class="card" style="margin-top:16px;border-left:4px solid #37474f;">
+                        <div class="card-body">
+                            <h4 style="margin:0 0 8px;font-size:1rem;">Cierre — Gerencia General</h4>
+                            <p><strong>Aprobación:</strong> ${ticket.gerenciaAprobado ? 'Sí' : 'No'}</p>
+                            <p style="white-space:pre-wrap;font-size:0.9rem;">${App.escapeHtml(ticket.gerenciaComentario || '—')}</p>
+                            ${ticket.gerenciaFecha ? `<p style="font-size:0.82rem;color:var(--text-secondary);">${formatDateTime(ticket.gerenciaFecha)}</p>` : ''}
+                        </div>
+                    </div>`;
+        }
+
+        const accionesCreador = puedeEditarCuerpo ? `
+                    <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar texto / visibilidad</button>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="App.eliminarSanction('${idJs}')"><i class="fas fa-trash"></i> Eliminar</button>
+                    </div>` : '';
 
         content.innerHTML = `
             <div class="card">
@@ -3434,25 +3973,69 @@ ${texto}</pre>
                         <button type="button" class="btn btn-outline btn-sm" onclick="App.navigate('${volver}')"><i class="fas fa-arrow-left"></i> Volver</button>
                         <h3 style="margin-top:12px;"><i class="fas fa-file-alt" style="margin-right:8px;color:var(--primary);"></i>${App.escapeHtml(ticket.titulo || 'Sin título')}</h3>
                     </div>
-                    <span class="status-badge ${pend ? 'pendiente' : 'aprobada'}" style="align-self:flex-start;"><i class="fas fa-${pend ? 'clock' : 'check'}"></i> ${SanctionFollowupManager.etiquetaEstado(ticket.estado)}</span>
+                    <span class="status-badge ${abierto ? 'pendiente' : 'aprobada'}" style="align-self:flex-start;"><i class="fas fa-${abierto ? 'clock' : 'check'}"></i> ${App.escapeHtml(flujoLabel)}</span>
                 </div>
                 <div class="card-body">
-                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;">
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">
                         Creado por <strong>${App.escapeHtml(ticket.creadoPorNombre || '')}</strong>
                         · ${formatDateTime(ticket.fechaCreacion)}
                         ${ticket.fechaCierre ? ` · Cierre: ${formatDateTime(ticket.fechaCierre)}` : ''}
                     </p>
-                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;"><strong>Pueden ver el texto:</strong> ${App.escapeHtml(visLine)}</p>
+                    <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;"><strong>Pueden ver el relato del caso:</strong> ${App.escapeHtml(visLine)}</p>
                     <div style="padding:16px;background:var(--bg-main);border-radius:var(--radius-md);border:1px solid var(--border-light);white-space:pre-wrap;font-size:0.92rem;line-height:1.5;">${App.escapeHtml(ticket.texto || '')}</div>
-                    ${puedeEditar ? `
-                    <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
-                        <button type="button" class="btn btn-success btn-sm" onclick="App.cambiarEstadoSanction('${idJs}','terminado')" ${pend ? '' : 'disabled style="opacity:0.45;"'}><i class="fas fa-check"></i> Marcar terminado</button>
-                        <button type="button" class="btn btn-outline btn-sm" onclick="App.cambiarEstadoSanction('${idJs}','en_espera')" ${pend ? 'disabled style="opacity:0.45;"' : ''}><i class="fas fa-undo"></i> Volver a en espera</button>
-                        <button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar</button>
-                        <button type="button" class="btn btn-danger btn-sm" onclick="App.eliminarSanction('${idJs}')"><i class="fas fa-trash"></i> Eliminar</button>
-                    </div>` : ''}
+                    ${accionesCreador}
+                    ${bloqueTi}
+                    ${bloqueRrhh}
+                    ${bloqueGg}
                 </div>
             </div>`;
+    }
+
+    static async submitSanctionTiRevision(id) {
+        const notas = document.getElementById('sanctionTiNotas')?.value || '';
+        try {
+            await SanctionFollowupManager.tiCompletarRevision(id, notas);
+            Toast.success('Listo', 'El caso pasó a Recursos Humanos.');
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones-detalle', { id });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async submitSanctionRrhhGuardar(id) {
+        const anotaciones = document.getElementById('sanctionRrhhAnot')?.value || '';
+        try {
+            await SanctionFollowupManager.rrhhGuardarAnotaciones(id, anotaciones);
+            Toast.success('Guardado', 'Anotaciones de RRHH actualizadas.');
+            App.navigate('seguimiento-sanciones-detalle', { id });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async submitSanctionRrhhEnviarGerencia(id) {
+        try {
+            await SanctionFollowupManager.rrhhEnviarAGerencia(id);
+            Toast.success('Enviado', 'El caso está en Gerencia General.');
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones-detalle', { id });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async submitSanctionGerenciaCerrar(id) {
+        const comentario = document.getElementById('sanctionGgComent')?.value || '';
+        const aprobado = Boolean(document.getElementById('sanctionGgAprueba')?.checked);
+        try {
+            await SanctionFollowupManager.gerenciaCerrar(id, { comentario, aprobado });
+            Toast.success('Cerrado', 'El expediente fue cerrado.');
+            await App.refreshSanctionSharedNavItem();
+            App.navigate('seguimiento-sanciones-detalle', { id });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
     }
 
     // ========================================================

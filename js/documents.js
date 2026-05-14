@@ -219,4 +219,22 @@ class DocumentManager {
             recientes: docs.sort((a, b) => new Date(b.fechaCreacion) - new Date(a.fechaCreacion)).slice(0, 5)
         };
     }
+
+    /** Incluye uid si firmasRequeridas es array u objeto (Firebase). */
+    static firmasRequeridasIncluyeUsuario(firmasRequeridas, userId) {
+        if (!firmasRequeridas || !userId) return false;
+        if (Array.isArray(firmasRequeridas)) return firmasRequeridas.includes(userId);
+        if (typeof firmasRequeridas === 'object') {
+            if (firmasRequeridas[userId] === true) return true;
+            return Object.values(firmasRequeridas).includes(userId);
+        }
+        return false;
+    }
+
+    static async getActivosRequiriendoFirmaDe(userId) {
+        const all = await this.getAll();
+        return all
+            .filter((d) => d.estado === 'activo' && this.firmasRequeridasIncluyeUsuario(d.firmasRequeridas, userId))
+            .sort((a, b) => String(b.fechaCreacion || '').localeCompare(String(a.fechaCreacion || '')));
+    }
 }

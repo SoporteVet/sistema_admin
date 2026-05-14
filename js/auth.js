@@ -193,6 +193,22 @@ class AuthManager {
         return this.getDepartamentosEncargado(user).includes(depId);
     }
 
+    /** Códigos de departamento del usuario (principal + áreas como encargado). */
+    static getDepartamentosLaborales(user) {
+        if (!user) return [];
+        const s = new Set();
+        if (user.departamento) s.add(user.departamento);
+        this.getDepartamentosEncargado(user).forEach((d) => s.add(d));
+        return [...s];
+    }
+
+    /** Incluye empleados del área (campo departamento) y encargados multi-área. */
+    static usuarioEnDepartamento(user, codigoDepartamento) {
+        if (!user || !codigoDepartamento) return false;
+        if (user.rol === 'admin') return true;
+        return this.getDepartamentosLaborales(user).includes(codigoDepartamento);
+    }
+
     // ========================================================
     // CRUD de Usuarios (Admin)
     // ========================================================

@@ -131,6 +131,10 @@
                         <i class="fas fa-book"></i>
                         <span>Biblioteca / Políticas</span>
                     </div>
+                    <div class="nav-item" data-view="expedientes-digitales" data-role="admin" onclick="App.navigate('expedientes-digitales')">
+                        <i class="fas fa-id-card-alt"></i>
+                        <span>Expediente digital</span>
+                    </div>
                 </div>
 
                 <!-- SOLICITUDES -->
@@ -149,7 +153,7 @@
                         <span>Gestionar Solicitudes</span>
                         <span class="badge" id="navNotifBadge" style="display:none;"></span>
                     </div>
-                    <div class="nav-item" data-view="seguimiento-sanciones" data-role="admin,encargado" onclick="App.navigate('seguimiento-sanciones')">
+                    <div class="nav-item" data-view="seguimiento-sanciones" data-role="all" onclick="App.navigate('seguimiento-sanciones')">
                         <i class="fas fa-gavel"></i>
                         <span>Sanciones / Quejas</span>
                     </div>
@@ -274,17 +278,18 @@
     <!-- ============================================================
          APP SCRIPTS
          ============================================================ -->
-    <script src="js/firebase-config.js?v=20260507g"></script>
-    <script src="js/data.js?v=20260507c"></script>
-    <script src="js/auth.js?v=20260507b"></script>
+    <script src="js/firebase-config.js?v=20260514a"></script>
+    <script src="js/data.js?v=20260507h"></script>
+    <script src="js/auth.js?v=20260507h"></script>
     <script src="js/notifications.js?v=20260319"></script>
-    <script src="js/documents.js?v=20260319"></script>
+    <script src="js/documents.js?v=20260514a"></script>
     <script src="js/politicas-internas.js?v=20260507e"></script>
+    <script src="js/expediente-empleado.js?v=20260514a"></script>
     <script src="js/requests.js?v=20260507b"></script>
-    <script src="js/sanctions-followup.js?v=20260507g"></script>
+    <script src="js/sanctions-followup.js?v=20260507h"></script>
     <script src="js/departamentos.js?v=20260416f"></script>
     <script src="js/pdf-generator.js?v=20260507c"></script>
-    <script src="js/app.js?v=20260507h"></script>
+    <script src="js/app.js?v=20260514a"></script>
 
 </body>
 </html>
