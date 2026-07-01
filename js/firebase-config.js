@@ -44,7 +44,12 @@ const dbRef = {
     politicasInternas: db.ref('politicasInternas'),
     politicasInternasFiles: db.ref('politicasInternasFiles'),
     expedientesEmpleado: db.ref('expedientesEmpleado'),
-    expedientesEmpleadoFiles: db.ref('expedientesEmpleadoFiles')
+    expedientesEmpleadoFiles: db.ref('expedientesEmpleadoFiles'),
+    evaluacionesDesempeno: db.ref('evaluacionesDesempeno'),
+    evaluacionesDesempenoFiles: db.ref('evaluacionesDesempenoFiles'),
+    evaluacionesByEvaluador: db.ref('evaluacionesByEvaluador'),
+    evaluacionesByPeriodo: db.ref('evaluacionesByPeriodo'),
+    evaluacionesUnique: db.ref('evaluacionesUnique')
 };
 
 console.log('🔥 Firebase inicializado correctamente');

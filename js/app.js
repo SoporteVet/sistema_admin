@@ -207,6 +207,9 @@ class App {
                 case 'politicas-internas': await this.renderPoliticasInternas(); break;
                 case 'expedientes-digitales': await this.renderExpedientesDigitales(); break;
                 case 'expediente-empleado': await this.renderExpedienteEmpleado(params.userId); break;
+                case 'evaluaciones-desempeno': await this.renderEvaluacionesDesempeno(params.tab); break;
+                case 'evaluacion-nueva': await this.renderEvaluacionNueva(params.tipo); break;
+                case 'evaluacion-detalle': await this.renderEvaluacionDetalle(params.id); break;
                 case 'ver-documento': await this.renderVerDocumento(params.id); break;
                 case 'solicitudes': await this.renderSolicitudes(); break;
                 case 'nueva-solicitud': this.renderNuevaSolicitud(); break;
@@ -241,6 +244,9 @@ class App {
         if (view === 'expediente-empleado') {
             navView = 'expedientes-digitales';
         }
+        if (view === 'evaluacion-nueva' || view === 'evaluacion-detalle') {
+            navView = 'evaluaciones-desempeno';
+        }
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.toggle('active', item.dataset.view === navView);
         });
@@ -254,6 +260,9 @@ class App {
             'politicas-internas': { title: 'Biblioteca / Políticas internas', desc: 'PDFs corporativos para consulta y descarga' },
             'expedientes-digitales': { title: 'Expediente digital', desc: 'Currículum, avisos y registro por usuario (solo administración)' },
             'expediente-empleado': { title: 'Expediente del usuario', desc: 'Documentación y registros asociados a la persona' },
+            'evaluaciones-desempeno': { title: 'Evaluaciones de desempeño', desc: 'Calificaciones semestrales del personal y jefaturas' },
+            'evaluacion-nueva': { title: 'Nueva evaluación', desc: 'Formulario de desempeño semestral' },
+            'evaluacion-detalle': { title: 'Detalle de evaluación', desc: 'Resultado y desglose por sección' },
             'ver-documento': { title: 'Ver Documento', desc: 'Detalle del documento' },
             'solicitudes': { title: 'Mis Solicitudes', desc: 'Vacaciones y permisos' },
             'nueva-solicitud': { title: 'Nueva Solicitud', desc: 'Solicitar vacaciones o permisos' },
@@ -1370,6 +1379,364 @@ class App {
         } catch (e) {
             console.error(e);
             content.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${App.escapeHtml(e.message || 'Error al cargar')}</p><button type="button" class="btn btn-primary" onclick="App.navigate('expedientes-digitales')">Volver</button></div>`;
+        }
+    }
+
+    // ========================================================
+    // EVALUACIONES DE DESEMPEÑO
+    // ========================================================
+
+    static _evalTabActiva = 'personal';
+
+    static renderEvaluacionesRows(list) {
+        if (!list || list.length === 0) {
+            return '<tr><td colspan="6" style="text-align:center;color:var(--text-secondary);">No hay evaluaciones en este periodo</td></tr>';
+        }
+        return list.map((ev) => {
+            const idEsc = App.escapeHtml(ev.id);
+            const catClass = ev.puntajeTotal >= 90 ? 'aprobada' : ev.puntajeTotal >= 70 ? 'pendiente' : 'pendiente';
+            return `<tr>
+                <td>${App.escapeHtml(getPeriodoSemestreLabel(ev.periodoSemestre))}</td>
+                <td>${App.escapeHtml(ev.evaluadoNombre || '')}</td>
+                <td>${App.escapeHtml(EvaluacionesDesempenoManager.etiquetaTipo(ev.tipo))}</td>
+                <td><strong>${ev.puntajeTotal}</strong> / 100</td>
+                <td><span class="status-badge ${catClass}">${App.escapeHtml(ev.categoriaResultado || '')}</span></td>
+                <td><button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('evaluacion-detalle', { id: '${idEsc}' })"><i class="fas fa-eye"></i> Ver</button></td>
+            </tr>`;
+        }).join('');
+    }
+
+    static async renderEvaluacionesDesempeno(tabInicial) {
+        const content = document.getElementById('contentArea');
+        const user = AuthManager.getUser();
+        if (!user) return;
+
+        const puedePersonal = EvaluacionesDesempenoManager.puedeCrearTipo('personal') || AuthManager.isAdmin();
+        const puedeJefaturas = EvaluacionesDesempenoManager.puedeCrearTipo('jefaturas') || AuthManager.isAdmin();
+        let tab = tabInicial || this._evalTabActiva;
+        if (tab === 'personal' && !puedePersonal && puedeJefaturas) tab = 'jefaturas';
+        if (tab === 'jefaturas' && !puedeJefaturas && puedePersonal) tab = 'personal';
+        this._evalTabActiva = tab;
+
+        const periodo = getPeriodoSemestreActual();
+        content.innerHTML = `<div class="card"><div class="card-body" style="text-align:center;padding:40px;"><i class="fas fa-spinner fa-spin"></i> Cargando…</div></div>`;
+
+        const [listPersonal, listJefaturas] = await Promise.all([
+            (puedePersonal || AuthManager.isAdmin()) ? EvaluacionesDesempenoManager.listParaUsuario('personal', null) : Promise.resolve([]),
+            (puedeJefaturas || AuthManager.isAdmin()) ? EvaluacionesDesempenoManager.listParaUsuario('jefaturas', null) : Promise.resolve([])
+        ]);
+
+        const tabsHtml = `
+            ${puedePersonal || AuthManager.isAdmin() ? `<button type="button" class="tab ${tab === 'personal' ? 'active' : ''}" onclick="App.navigate('evaluaciones-desempeno', { tab: 'personal' })">Desempeño del personal</button>` : ''}
+            ${puedeJefaturas || AuthManager.isAdmin() ? `<button type="button" class="tab ${tab === 'jefaturas' ? 'active' : ''}" onclick="App.navigate('evaluaciones-desempeno', { tab: 'jefaturas' })">Desempeño de jefaturas</button>` : ''}`;
+
+        const listaActiva = tab === 'jefaturas' ? listJefaturas : listPersonal;
+        const btnNueva = (tab === 'personal' && EvaluacionesDesempenoManager.puedeCrearTipo('personal')) ||
+            (tab === 'jefaturas' && EvaluacionesDesempenoManager.puedeCrearTipo('jefaturas'))
+            ? `<button type="button" class="btn btn-primary btn-sm" onclick="App.navigate('evaluacion-nueva', { tipo: '${tab}' })"><i class="fas fa-plus"></i> Nueva evaluación</button>`
+            : '';
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-star" style="margin-right:8px;color:var(--primary);"></i>Evaluaciones de desempeño</h3>
+                    ${btnNueva}
+                </div>
+                <div class="card-body">
+                    <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;">
+                        Evaluaciones <strong>semestrales</strong>. Periodo activo: <strong>${App.escapeHtml(getPeriodoSemestreLabel(periodo))}</strong>.
+                        ${AuthManager.isAdmin() ? 'Como administrador ve todas las evaluaciones.' : ''}
+                        ${user.rol === 'encargado' ? 'Puede ver las evaluaciones de personal que usted realizó.' : ''}
+                        ${user.rol === 'empleado' ? 'Puede ver las evaluaciones a jefaturas que usted envió.' : ''}
+                    </p>
+                    <div class="tabs" style="margin-bottom:16px;">${tabsHtml}</div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead><tr><th>Periodo</th><th>Evaluado</th><th>Tipo</th><th>Puntaje</th><th>Categoría</th><th></th></tr></thead>
+                            <tbody>${this.renderEvaluacionesRows(listaActiva)}</tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    static buildEvaluacionCriteriosHtml(tipo) {
+        const plantilla = getPlantillaEvaluacion(tipo);
+        if (!plantilla) return '';
+        return plantilla.secciones.map((sec) => {
+            const filas = sec.criterios.map((c) => {
+                const opts = [];
+                for (let i = 0; i <= c.max; i++) {
+                    const lbl = EVALUACION_ESCALA.etiquetas[i] ? `${i} — ${EVALUACION_ESCALA.etiquetas[i].split('—')[0].trim()}` : String(i);
+                    opts.push(`<option value="${i}">${App.escapeHtml(lbl)}</option>`);
+                }
+                return `<tr>
+                    <td>${App.escapeHtml(c.texto)}</td>
+                    <td style="width:220px;">
+                        <select class="form-control eval-crit" data-crit-id="${App.escapeHtml(c.id)}" data-crit-max="${c.max}" required onchange="App.recalcularPreviewEvaluacion('${App.escapeJsString(tipo)}')">
+                            <option value="">—</option>${opts.join('')}
+                        </select>
+                    </td>
+                    <td style="width:60px;text-align:center;color:var(--text-secondary);">/ ${c.max}</td>
+                </tr>`;
+            }).join('');
+            return `
+                <div class="card" style="margin-bottom:16px;">
+                    <div class="card-header"><h4 style="font-size:1rem;margin:0;">${App.escapeHtml(sec.id)}. ${App.escapeHtml(sec.nombre)} <span style="font-weight:normal;color:var(--text-secondary);">(máx. ${sec.maxSeccion} pts)</span></h4></div>
+                    <div class="card-body no-padding">
+                        <table class="data-table"><thead><tr><th>Criterio</th><th>Puntaje</th><th>Máx.</th></tr></thead><tbody>${filas}</tbody></table>
+                        <div style="padding:12px 16px;border-top:1px solid var(--border);">
+                            <label style="font-size:0.85rem;color:var(--text-secondary);">Observaciones de la sección</label>
+                            <textarea class="form-control eval-obs-sec" data-sec-id="${App.escapeHtml(sec.id)}" rows="2" maxlength="2000" placeholder="Opcional"></textarea>
+                            <p style="margin:8px 0 0;font-size:0.85rem;">Subtotal: <strong id="evalSub_${sec.id}">0</strong> / ${sec.maxSeccion}</p>
+                        </div>
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    static recalcularPreviewEvaluacion(tipo) {
+        const respuestas = {};
+        const observacionesSecciones = {};
+        document.querySelectorAll('.eval-crit').forEach((el) => {
+            const id = el.dataset.critId;
+            const v = el.value;
+            if (v !== '') respuestas[id] = Number(v);
+        });
+        document.querySelectorAll('.eval-obs-sec').forEach((el) => {
+            observacionesSecciones[el.dataset.secId] = el.value;
+        });
+        const { puntajeTotal, desgloseSecciones, clasificacion } =
+            calcularPuntajeEvaluacion(tipo, respuestas, observacionesSecciones);
+        const totalEl = document.getElementById('evalPreviewTotal');
+        const catEl = document.getElementById('evalPreviewCategoria');
+        const sugEl = document.getElementById('evalPreviewSugerencia');
+        if (totalEl) totalEl.textContent = String(puntajeTotal);
+        if (catEl) catEl.textContent = clasificacion.categoria;
+        if (sugEl) sugEl.textContent = clasificacion.resultadoSugerido;
+        Object.keys(desgloseSecciones).forEach((sid) => {
+            const el = document.getElementById(`evalSub_${sid}`);
+            if (el) el.textContent = String(desgloseSecciones[sid].subtotal);
+        });
+    }
+
+    static async renderEvaluacionNueva(tipo) {
+        const content = document.getElementById('contentArea');
+        if (!EvaluacionesDesempenoManager.puedeCrearTipo(tipo)) {
+            content.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Sin permiso</h3><p>No puede crear este tipo de evaluación.</p></div>';
+            return;
+        }
+        await this.ensureDepsLoaded();
+        const plantilla = getPlantillaEvaluacion(tipo);
+        const evaluados = await EvaluacionesDesempenoManager.getEvaluadosDisponibles(tipo);
+        const periodo = getPeriodoSemestreActual();
+        const rango = getPeriodoSemestreRango(periodo);
+        const isAdmin = AuthManager.isAdmin();
+        const labels = plantilla.labelsCualitativos;
+
+        let evaluadosOpts = '<option value="">— Seleccione —</option>';
+        evaluados.sort((a, b) => `${a.apellido} ${a.nombre}`.localeCompare(`${b.apellido} ${b.nombre}`, 'es'));
+        evaluados.forEach((u) => {
+            const dep = App._depsMap[u.departamento]?.nombre || u.departamento || '';
+            evaluadosOpts += `<option value="${App.escapeHtml(u.id)}">${App.escapeHtml(`${u.nombre} ${u.apellido}`)} — ${App.escapeHtml(dep)}</option>`;
+        });
+
+        const decisionesHtml = isAdmin ? (plantilla.decisionesAdministrativas || []).map((d) =>
+            `<label style="display:block;margin-bottom:6px;"><input type="radio" name="evalDecision" value="${App.escapeHtml(d.id)}"> ${App.escapeHtml(d.label)}</label>`
+        ).join('') : '';
+
+        content.innerHTML = `
+            <div style="margin-bottom:16px;">
+                <button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('evaluaciones-desempeno', { tab: '${App.escapeHtml(tipo)}' })"><i class="fas fa-arrow-left"></i> Volver</button>
+            </div>
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header"><h3>${App.escapeHtml(plantilla.titulo)}</h3></div>
+                <div class="card-body">
+                    <form id="formEvaluacionDesempeno" onsubmit="App.handleEvaluacionSubmit(event, '${App.escapeJsString(tipo)}')">
+                        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:20px;">
+                            <div class="form-group">
+                                <label>Persona evaluada <span class="required">*</span></label>
+                                <select id="evalEvaluadoId" class="form-control" required>${evaluadosOpts}</select>
+                            </div>
+                            <div class="form-group">
+                                <label>Periodo semestral</label>
+                                <input type="text" class="form-control" value="${App.escapeHtml(getPeriodoSemestreLabel(periodo))}" readonly>
+                                <input type="hidden" id="evalPeriodoSemestre" value="${App.escapeHtml(periodo)}">
+                            </div>
+                            <div class="form-group">
+                                <label>Fecha de evaluación</label>
+                                <input type="date" id="evalFecha" class="form-control" value="${new Date().toISOString().split('T')[0]}" required>
+                            </div>
+                            <div class="form-group">
+                                <label>Puesto (opcional)</label>
+                                <input type="text" id="evalPuesto" class="form-control" maxlength="120" placeholder="Puesto del evaluado">
+                            </div>
+                        </div>
+                        <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;">
+                            Periodo evaluado: ${App.escapeHtml(rango.desde)} a ${App.escapeHtml(rango.hasta)}. Escala 0–5 por criterio (máximo según columna).
+                        </p>
+                        ${this.buildEvaluacionCriteriosHtml(tipo)}
+                        <div class="card" style="margin-bottom:16px;background:var(--bg-secondary);">
+                            <div class="card-body">
+                                <h4 style="margin:0 0 12px;">Resultado preliminar</h4>
+                                <p style="margin:0;font-size:1.25rem;"><strong id="evalPreviewTotal">0</strong> / 100 — <span id="evalPreviewCategoria">—</span></p>
+                                <p style="margin:8px 0 0;color:var(--text-secondary);font-size:0.9rem;" id="evalPreviewSugerencia">—</p>
+                            </div>
+                        </div>
+                        <div class="form-group"><label>${App.escapeHtml(labels.fortalezas)}</label><textarea id="evalFortalezas" class="form-control" rows="3" maxlength="5000"></textarea></div>
+                        <div class="form-group"><label>${App.escapeHtml(labels.areasMejora)}</label><textarea id="evalAreasMejora" class="form-control" rows="3" maxlength="5000"></textarea></div>
+                        <div class="form-group"><label>${App.escapeHtml(labels.recomendaciones)}</label><textarea id="evalRecomendaciones" class="form-control" rows="3" maxlength="5000"></textarea></div>
+                        ${isAdmin ? `<div class="form-group"><label>Decisión administrativa</label>${decisionesHtml}</div>
+                        <div class="form-group"><label>Observación de administración</label><textarea id="evalObsAdmin" class="form-control" rows="2" maxlength="5000"></textarea></div>` : ''}
+                        <div class="form-group">
+                            <label>Adjuntar PDF (opcional, máx. 4 MB)</label>
+                            <input type="file" id="evalPdfFile" accept=".pdf,application/pdf">
+                        </div>
+                        <button type="submit" class="btn btn-primary btn-lg" id="btnEvalSubmit"><i class="fas fa-paper-plane"></i> Enviar evaluación</button>
+                    </form>
+                </div>
+            </div>`;
+    }
+
+    static async handleEvaluacionSubmit(e, tipo) {
+        e.preventDefault();
+        const btn = document.getElementById('btnEvalSubmit');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando…'; }
+        try {
+            const respuestas = {};
+            document.querySelectorAll('.eval-crit').forEach((el) => { respuestas[el.dataset.critId] = el.value; });
+            const observacionesSecciones = {};
+            document.querySelectorAll('.eval-obs-sec').forEach((el) => { observacionesSecciones[el.dataset.secId] = el.value; });
+            const decisionEl = document.querySelector('input[name="evalDecision"]:checked');
+            const file = document.getElementById('evalPdfFile')?.files?.[0] || null;
+            const ev = await EvaluacionesDesempenoManager.create({
+                tipo,
+                evaluadoId: document.getElementById('evalEvaluadoId')?.value,
+                periodoSemestre: document.getElementById('evalPeriodoSemestre')?.value,
+                fechaEvaluacion: document.getElementById('evalFecha')?.value,
+                evaluadoPuesto: document.getElementById('evalPuesto')?.value,
+                respuestas,
+                observacionesSecciones,
+                fortalezas: document.getElementById('evalFortalezas')?.value,
+                areasMejora: document.getElementById('evalAreasMejora')?.value,
+                recomendaciones: document.getElementById('evalRecomendaciones')?.value,
+                decisionAdministrativa: decisionEl ? decisionEl.value : '',
+                observacionAdministracion: document.getElementById('evalObsAdmin')?.value || '',
+                file
+            });
+            Toast.success('Evaluación enviada', `Total: ${ev.puntajeTotal}/100 — ${ev.categoriaResultado}`);
+            App.navigate('evaluacion-detalle', { id: ev.id });
+        } catch (err) {
+            Toast.error('Error', err.message || 'No se pudo guardar');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fas fa-paper-plane"></i> Enviar evaluación'; }
+        }
+    }
+
+    static async renderEvaluacionDetalle(id) {
+        const content = document.getElementById('contentArea');
+        if (!id) {
+            content.innerHTML = '<div class="empty-state"><h3>Evaluación no especificada</h3></div>';
+            return;
+        }
+        content.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:40px;"><i class="fas fa-spinner fa-spin"></i></div></div>';
+        const ev = await EvaluacionesDesempenoManager.getById(id);
+        if (!ev || !EvaluacionesDesempenoManager.puedeVer(ev)) {
+            content.innerHTML = '<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>No puede ver esta evaluación.</p></div>';
+            return;
+        }
+        await this.ensureDepsLoaded();
+        const plantilla = getPlantillaEvaluacion(ev.tipo);
+        const dep = App._depsMap[ev.evaluadoDepartamento]?.nombre || ev.evaluadoDepartamento || '—';
+        const isAdmin = AuthManager.isAdmin();
+
+        let seccionesHtml = '';
+        (plantilla?.secciones || []).forEach((sec) => {
+            const des = ev.desgloseSecciones?.[sec.id] || {};
+            const filas = sec.criterios.map((c) => `<tr>
+                <td>${App.escapeHtml(c.texto)}</td>
+                <td style="text-align:center;"><strong>${ev.respuestas?.[c.id] ?? '—'}</strong> / ${c.max}</td>
+            </tr>`).join('');
+            seccionesHtml += `
+                <div class="card" style="margin-bottom:12px;">
+                    <div class="card-header"><h4 style="font-size:0.95rem;margin:0;">${App.escapeHtml(sec.id)}. ${App.escapeHtml(sec.nombre)} — ${des.subtotal ?? 0}/${sec.maxSeccion}</h4></div>
+                    <div class="card-body no-padding">
+                        <table class="data-table"><tbody>${filas}</tbody></table>
+                        ${des.observaciones ? `<p style="padding:12px 16px;margin:0;font-size:0.9rem;color:var(--text-secondary);"><strong>Observaciones:</strong> ${App.escapeHtml(des.observaciones)}</p>` : ''}
+                    </div>
+                </div>`;
+        });
+
+        const decisionesHtml = isAdmin ? (plantilla?.decisionesAdministrativas || []).map((d) =>
+            `<label style="display:block;margin-bottom:6px;"><input type="radio" name="evalDecisionEdit" value="${App.escapeHtml(d.id)}" ${ev.decisionAdministrativa === d.id ? 'checked' : ''}> ${App.escapeHtml(d.label)}</label>`
+        ).join('') : '';
+
+        content.innerHTML = `
+            <div style="margin-bottom:16px;">
+                <button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('evaluaciones-desempeno', { tab: '${App.escapeHtml(ev.tipo)}' })"><i class="fas fa-arrow-left"></i> Volver</button>
+            </div>
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-header">
+                    <h3>${App.escapeHtml(plantilla?.titulo || 'Evaluación')}</h3>
+                    <span class="status-badge aprobada">${App.escapeHtml(ev.categoriaResultado || '')}</span>
+                </div>
+                <div class="card-body">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;font-size:0.9rem;">
+                        <div><strong>Evaluado:</strong> ${App.escapeHtml(ev.evaluadoNombre)}</div>
+                        <div><strong>Evaluador:</strong> ${App.escapeHtml(ev.evaluadorNombre)}</div>
+                        <div><strong>Periodo:</strong> ${App.escapeHtml(getPeriodoSemestreLabel(ev.periodoSemestre))}</div>
+                        <div><strong>Departamento:</strong> ${App.escapeHtml(dep)}</div>
+                        <div><strong>Fecha:</strong> ${App.escapeHtml(ev.fechaEvaluacion || '')}</div>
+                        <div><strong>Puntaje total:</strong> <span style="font-size:1.2rem;">${ev.puntajeTotal}</span> / 100</div>
+                    </div>
+                    <p style="margin-top:12px;color:var(--text-secondary);"><strong>Resultado sugerido:</strong> ${App.escapeHtml(ev.resultadoSugerido || '')}</p>
+                    ${ev.tieneAdjunto ? `<button type="button" class="btn btn-sm btn-outline" style="margin-top:12px;" onclick="App.openEvaluacionPdf('${App.escapeJsString(id)}')"><i class="fas fa-file-pdf"></i> Ver PDF adjunto</button>` : ''}
+                </div>
+            </div>
+            ${seccionesHtml}
+            <div class="card" style="margin-bottom:16px;">
+                <div class="card-body">
+                    ${ev.fortalezas ? `<p><strong>${App.escapeHtml(plantilla?.labelsCualitativos?.fortalezas || 'Fortalezas')}:</strong><br>${App.escapeHtml(ev.fortalezas)}</p>` : ''}
+                    ${ev.areasMejora ? `<p><strong>${App.escapeHtml(plantilla?.labelsCualitativos?.areasMejora || 'Áreas de mejora')}:</strong><br>${App.escapeHtml(ev.areasMejora)}</p>` : ''}
+                    ${ev.recomendaciones ? `<p><strong>${App.escapeHtml(plantilla?.labelsCualitativos?.recomendaciones || 'Recomendaciones')}:</strong><br>${App.escapeHtml(ev.recomendaciones)}</p>` : ''}
+                    ${ev.decisionAdministrativa ? `<p><strong>Decisión administrativa:</strong> ${App.escapeHtml(EvaluacionesDesempenoManager.etiquetaDecision(ev.tipo, ev.decisionAdministrativa))}</p>` : ''}
+                    ${ev.observacionAdministracion ? `<p><strong>Observación de administración:</strong><br>${App.escapeHtml(ev.observacionAdministracion)}</p>` : ''}
+                </div>
+            </div>
+            ${isAdmin ? `
+            <div class="card">
+                <div class="card-header"><h4 style="margin:0;font-size:1rem;">Actualizar decisión administrativa</h4></div>
+                <div class="card-body">
+                    ${decisionesHtml}
+                    <div class="form-group" style="margin-top:12px;"><label>Observación de administración</label>
+                        <textarea id="evalObsAdminEdit" class="form-control" rows="3">${App.escapeHtml(ev.observacionAdministracion || '')}</textarea>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="App.handleEvaluacionAdminUpdate('${App.escapeJsString(id)}')"><i class="fas fa-save"></i> Guardar</button>
+                </div>
+            </div>` : ''}`;
+    }
+
+    static async openEvaluacionPdf(id) {
+        try {
+            const { blob, nombreArchivo } = await EvaluacionesDesempenoManager.getPdfBlob(id);
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+            setTimeout(() => URL.revokeObjectURL(url), 120000);
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo abrir el PDF');
+        }
+    }
+
+    static async handleEvaluacionAdminUpdate(id) {
+        try {
+            const decisionEl = document.querySelector('input[name="evalDecisionEdit"]:checked');
+            await EvaluacionesDesempenoManager.updateAdminFields(id, {
+                decisionAdministrativa: decisionEl ? decisionEl.value : null,
+                observacionAdministracion: document.getElementById('evalObsAdminEdit')?.value || ''
+            });
+            Toast.success('Actualizado', 'Decisión administrativa guardada.');
+            await App.renderEvaluacionDetalle(id);
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo actualizar');
         }
     }
 

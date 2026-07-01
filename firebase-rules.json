@@ -1,0 +1,700 @@
+{
+  "rules": {
+    "users": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+        root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+        root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+      )",
+      "$uid": {
+        ".read": "auth != null && ($uid === auth.uid || (root.child('users').child(auth.uid).exists() && (root.child('users').child(auth.uid).child('rol').val() === 'admin' || root.child('users').child(auth.uid).child('rol').val() === 'encargado')))",
+        ".write": "auth != null && (
+          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+          ($uid === auth.uid && !data.exists()) ||
+          ($uid === auth.uid && data.exists() && !newData.hasChild('rol') && !newData.hasChild('departamento')) ||
+          (!data.exists() && !root.child('users').hasChildren())
+        )",
+        ".validate": "!newData.exists() || data.exists() || newData.hasChildren(['nombre', 'apellido', 'email', 'rol', 'departamento', 'activo', 'fechaCreacion'])",
+        "nombre": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+        },
+        "apellido": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+        },
+        "email": {
+          ".validate": "newData.isString() && newData.val().matches(/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$/)"
+        },
+        "rol": {
+          ".validate": "newData.isString() && (newData.val() === 'admin' || newData.val() === 'encargado' || newData.val() === 'empleado')"
+        },
+        "departamento": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "departamentosEncargado": {
+          "$deptCode": {
+            ".validate": "newData.isBoolean()"
+          }
+        },
+        "activo": {
+          ".validate": "newData.isBoolean()"
+        },
+        "fechaCreacion": {
+          ".validate": "newData.isString()"
+        },
+        "codigoPersonal": {
+          ".validate": "newData.isString() && newData.val().length >= 4 && newData.val().length <= 20 && newData.val().matches(/^[A-Z0-9]+$/)"
+        }
+      }
+    },
+
+    "documents": {
+      ".read": "auth != null",
+      "$docId": {
+        ".read": "auth != null && (
+          data.child('estado').val() === 'activo' &&
+          (
+            (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+            data.child('firmasRequeridas').hasChild(auth.uid) ||
+            data.child('creadoPor').val() === auth.uid
+          )
+        )",
+        ".write": "auth != null && (
+          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+          (
+            root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+            (
+              !data.exists() ||
+              data.child('creadoPor').val() === auth.uid
+            )
+          )
+        )",
+        ".validate": "newData.hasChildren(['codigo', 'departamento', 'categoria', 'subcategoria', 'titulo', 'contenido', 'creadoPor', 'fechaCreacion', 'estado', 'verificacionCode'])",
+        "codigo": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "titulo": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+        },
+        "contenido": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "estado": {
+          ".validate": "newData.isString() && (newData.val() === 'activo' || newData.val() === 'eliminado')"
+        },
+        "firmas": {
+          "$firmaId": {
+            ".write": "auth != null && (
+              (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+              (newData.child('userId').val() === auth.uid && !data.exists())
+            )",
+            ".validate": "newData.hasChildren(['userId', 'nombre', 'rol', 'departamento', 'fecha', 'codigoVerificacion'])"
+          }
+        },
+        "firmasRequeridas": {
+          ".validate": "newData.hasChildren() || newData.val() === null"
+        }
+      }
+    },
+
+    "requests": {
+      ".read": "auth != null",
+      "$reqId": {
+        ".read": "auth != null && (
+          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+            data.child('solicitante').val() === auth.uid ||
+          (
+            root.child('users').child(auth.uid).exists() &&
+            (root.child('users').child(auth.uid).child('rol').val() === 'encargado' || root.child('users').child(auth.uid).child('rol').val() === 'admin') &&
+            (
+              data.child('departamento').val() === root.child('users').child(auth.uid).child('departamento').val() ||
+              root.child('users').child(auth.uid).child('departamentosEncargado').child(data.child('departamento').val()).val() === true
+            )
+          )
+        )",
+        ".write": "auth != null && (
+          !data.exists() ||
+          (
+            (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+            (
+              root.child('users').child(auth.uid).exists() &&
+              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+              (
+                (
+                  (
+                    data.child('departamento').val() === root.child('users').child(auth.uid).child('departamento').val() ||
+                    root.child('users').child(auth.uid).child('departamentosEncargado').child(data.child('departamento').val()).val() === true
+                  ) &&
+                  data.child('estado').val() === 'pendiente'
+                ) ||
+                data.child('estado').val() === 'pendiente_ti' ||
+                data.child('estado').val() === 'pendiente_gerencia'
+              )
+            )
+          )
+        )",
+        ".validate": "newData.hasChildren(['tipo', 'tipoNombre', 'solicitante', 'solicitanteNombre', 'departamento', 'estado', 'fechaSolicitud'])",
+        "tipo": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "estado": {
+          ".validate": "newData.isString() && (newData.val() === 'pendiente' || newData.val() === 'pendiente_ti' || newData.val() === 'pendiente_gerencia' || newData.val() === 'aprobada' || newData.val() === 'rechazada')"
+        },
+        "solicitante": {
+          ".validate": "newData.isString() && newData.val() === auth.uid"
+        },
+        "datos": {
+          ".validate": "newData.hasChildren() || newData.val() === null"
+        }
+      }
+    },
+
+    "notifications": {
+      ".read": "auth != null",
+      "$notifId": {
+        ".read": "auth != null && data.child('destinatario').val() === auth.uid",
+        ".write": "auth != null && (
+          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+          (
+            data.child('destinatario').val() === auth.uid &&
+            newData.child('leida').val() === true &&
+            !newData.hasChild('destinatario')
+          )
+        )",
+        ".validate": "newData.hasChildren(['tipo', 'titulo', 'mensaje', 'destinatario', 'fecha', 'leida'])",
+        "destinatario": {
+          ".validate": "newData.isString() && newData.val().length > 0"
+        },
+        "leida": {
+          ".validate": "newData.isBoolean()"
+        },
+        "fecha": {
+          ".validate": "newData.isString()"
+        }
+      }
+    },
+
+    "counters": {
+      ".read": "auth != null",
+      ".write": "auth != null && (
+        !data.exists() ||
+        (root.child('users').child(auth.uid).exists() &&
+         (root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('rol').val() === 'encargado'))
+      )",
+      "$departamento": {
+        "$subcategoria": {
+          ".read": "auth != null && (
+            (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+            (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'encargado')
+          )",
+          ".write": "auth != null && (
+            (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+            (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'encargado')
+          )",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        }
+      }
+    },
+
+    "sanctionFollowups": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      ".indexOn": ["creadoPor"],
+      "$ticketId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          data.child('creadoPor').val() === auth.uid ||
+          data.child('visiblesPara').hasChild(auth.uid) ||
+          (
+            data.hasChild('flujoEtapa') &&
+            data.child('flujoEtapa').val() === 'pendiente_ti' &&
+            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+          ) ||
+          (
+            data.hasChild('flujoEtapa') &&
+            (data.child('flujoEtapa').val() === 'pendiente_rrhh' || data.child('flujoEtapa').val() === 'pendiente_gerencia' || data.child('flujoEtapa').val() === 'cerrado') &&
+            root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+          ) ||
+          (
+            data.hasChild('flujoEtapa') &&
+            (data.child('flujoEtapa').val() === 'pendiente_gerencia' || data.child('flujoEtapa').val() === 'cerrado') &&
+            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          )
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          (!data.exists() && newData.exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+          )) ||
+          (!newData.exists() && data.exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              data.child('creadoPor').val() === auth.uid &&
+              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+              (!data.hasChild('flujoEtapa') || data.child('flujoEtapa').val() === 'pendiente_ti')
+            )
+          )) ||
+          (data.exists() && newData.exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              data.child('creadoPor').val() === auth.uid &&
+              root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+            )
+          ))
+        )",
+        ".validate": "!newData.exists() || !data.exists() || (newData.hasChildren(['titulo', 'texto', 'estado', 'flujoEtapa', 'creadoPor', 'creadoPorNombre', 'departamento', 'fechaCreacion', 'fechaActualizacion', 'visiblesPara']) && newData.child('flujoEtapa').val() === 'pendiente_ti')",
+        "titulo": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 300"
+        },
+        "texto": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50000"
+        },
+        "fechaActualizacion": {
+          ".validate": "!newData.exists() || newData.isString()"
+        },
+        "flujoEtapa": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' &&
+              data.val() === 'pendiente_ti' &&
+              newData.val() === 'pendiente_rrhh'
+            ) ||
+            (
+              root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' &&
+              data.val() === 'pendiente_rrhh' &&
+              newData.val() === 'pendiente_gerencia'
+            ) ||
+            (
+              root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' &&
+              data.val() === 'pendiente_gerencia' &&
+              newData.val() === 'cerrado'
+            )
+          )",
+          ".validate": "!newData.exists() || (newData.isString() && (newData.val() === 'pendiente_ti' || newData.val() === 'pendiente_rrhh' || newData.val() === 'pendiente_gerencia' || newData.val() === 'cerrado'))"
+        },
+        "estado": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' &&
+              root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_gerencia' &&
+              newData.val() === 'terminado'
+            )
+          )",
+          ".validate": "newData.isString() && (newData.val() === 'en_espera' || newData.val() === 'terminado')"
+        },
+        "fechaCierre": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          )",
+          ".validate": "!newData.exists() || newData.isString()"
+        },
+        "gerenciaAprobado": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          )",
+          ".validate": "!newData.exists() || newData.isBoolean()"
+        },
+        "gerenciaComentario": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          )",
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 5000)"
+        },
+        "gerenciaPor": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          )",
+          ".validate": "!newData.exists() || newData.isString()"
+        },
+        "gerenciaFecha": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          )",
+          ".validate": "!newData.exists() || newData.isString()"
+        },
+        "creadoPor": {
+          ".validate": "newData.isString()"
+        }
+      }
+    },
+
+    "sanctionFollowupsTiReview": {
+      "$ticketId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' &&
+            root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_ti'
+          )
+        )",
+        ".validate": "!newData.exists() || newData.hasChildren(['revisado', 'fecha'])"
+      }
+    },
+
+    "sanctionFollowupsRrhh": {
+      "$ticketId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' ||
+          root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' &&
+            root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_rrhh'
+          )
+        )",
+        ".validate": "!newData.exists() || newData.hasChildren(['anotaciones', 'fecha'])"
+      }
+    },
+
+    "sanctionFollowupsQueueTi": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+        root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+        root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+      )",
+      "$ticketId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            newData.exists() &&
+            newData.val() === true &&
+            root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid &&
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+          ) ||
+          (
+            !newData.exists() &&
+            (
+              root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+            )
+          )
+        )",
+        ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+
+    "sanctionFollowupsQueueRrhh": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+        root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+        root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+      )",
+      "$ticketId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            newData.exists() &&
+            newData.val() === true &&
+            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+          ) ||
+          (
+            !newData.exists() &&
+            (
+              root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+              root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' ||
+              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+            )
+          )
+        )",
+        ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+
+    "sanctionFollowupsQueueGg": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+        root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+        root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+      )",
+      "$ticketId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            newData.exists() &&
+            newData.val() === true &&
+            root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+          ) ||
+          (
+            !newData.exists() &&
+            (
+              root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+              root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' ||
+              root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+            )
+          )
+        )",
+        ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+
+    "sanctionFollowupsByCreator": {
+      "$creatorUid": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          auth.uid === $creatorUid ||
+          root.child('users').child(auth.uid).child('rol').val() === 'admin'
+        )",
+        "$ticketId": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              auth.uid === $creatorUid &&
+              (
+                root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+                root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+              )
+            )
+          )",
+          ".validate": "!newData.exists() || newData.val() === true"
+        }
+      }
+    },
+
+    "sanctionFollowupsIndex": {
+      "$viewerId": {
+        ".read": "auth != null && auth.uid === $viewerId",
+        "$ticketId": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid
+            )
+          )",
+          ".validate": "!newData.exists() || newData.val() === true"
+        }
+      }
+    },
+
+    "politicasInternas": {
+      ".read": "auth != null",
+      "$id": {
+        ".read": "auth != null && (!data.exists() || data.child('estado').val() === 'activo')",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+        ".validate": "!newData.exists() || newData.hasChildren(['titulo', 'nombreArchivo', 'creadoPor', 'fechaCreacion', 'estado'])",
+        "titulo": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 300"
+        },
+        "descripcion": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 2000)"
+        },
+        "nombreArchivo": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 260"
+        },
+        "mimeType": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 120)"
+        },
+        "tamañoBytes": {
+          ".validate": "!newData.exists() || (newData.isNumber() && newData.val() >= 0 && newData.val() <= 4194304)"
+        },
+        "creadoPor": {
+          ".validate": "newData.isString() && newData.val() === auth.uid"
+        },
+        "creadoPorNombre": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 200)"
+        },
+        "fechaCreacion": {
+          ".validate": "newData.isString()"
+        },
+        "estado": {
+          ".validate": "newData.isString() && (newData.val() === 'activo' || newData.val() === 'eliminado')"
+        }
+      }
+    },
+
+    "politicasInternasFiles": {
+      ".read": "auth != null",
+      "$id": {
+        ".read": "auth != null && root.child('politicasInternas').child($id).child('estado').val() === 'activo'",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+        ".validate": "!newData.exists() || newData.hasChildren(['pdfBase64'])",
+        "pdfBase64": {
+          ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 6000000"
+        }
+      }
+    },
+
+    "expedientesEmpleado": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+      "$uid": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+        "curriculum": {
+          ".validate": "!newData.exists() || (newData.hasChildren(['titulo', 'nombreArchivo', 'mimeType', 'tamañoBytes', 'fechaActualizacion', 'actualizadoPor']) && newData.child('titulo').isString() && newData.child('titulo').val().length > 0 && newData.child('titulo').val().length <= 200 && newData.child('nombreArchivo').isString() && newData.child('nombreArchivo').val().length > 0 && newData.child('nombreArchivo').val().length <= 260 && newData.child('mimeType').isString() && newData.child('mimeType').val().length <= 120 && newData.child('tamañoBytes').isNumber() && newData.child('tamañoBytes').val() >= 0 && newData.child('tamañoBytes').val() <= 4194304 && newData.child('fechaActualizacion').isString() && newData.child('actualizadoPor').isString())"
+        },
+        "registros": {
+          "$registroId": {
+            ".validate": "!newData.exists() || (newData.hasChildren(['tipo', 'titulo', 'detalle', 'fecha', 'creadoPor', 'creadoPorNombre']) && newData.child('tipo').isString() && (newData.child('tipo').val() === 'aviso' || newData.child('tipo').val() === 'amonestacion' || newData.child('tipo').val() === 'nota' || newData.child('tipo').val() === 'otro') && newData.child('titulo').isString() && newData.child('titulo').val().length > 0 && newData.child('titulo').val().length <= 300 && newData.child('detalle').isString() && newData.child('detalle').val().length <= 10000 && newData.child('fecha').isString() && newData.child('creadoPor').isString() && newData.child('creadoPorNombre').isString() && newData.child('creadoPorNombre').val().length <= 200)"
+          }
+        }
+      }
+    },
+
+    "expedientesEmpleadoFiles": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+      "$uid": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+        ".validate": "!newData.exists() || newData.hasChildren(['pdfBase64'])",
+        "pdfBase64": {
+          ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 6000000"
+        }
+      }
+    },
+
+    "evaluacionesDesempeno": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+      ".indexOn": ["evaluadorId", "evaluadoId", "tipo", "periodoSemestre"],
+      "$evalId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          data.child('evaluadorId').val() === auth.uid
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            !data.exists() &&
+            newData.child('evaluadorId').val() === auth.uid &&
+            newData.child('estado').val() === 'enviada'
+          ) ||
+          (
+            data.exists() &&
+            data.child('evaluadorId').val() === auth.uid &&
+            root.child('users').child(auth.uid).child('rol').val() !== 'admin' &&
+            !newData.hasChild('decisionAdministrativa') &&
+            !newData.hasChild('observacionAdministracion')
+          )
+        )",
+        ".validate": "!newData.exists() || (
+          newData.hasChildren(['tipo', 'periodoSemestre', 'evaluadorId', 'evaluadoId', 'puntajeTotal', 'estado', 'fechaCreacion']) &&
+          (newData.child('tipo').val() === 'personal' || newData.child('tipo').val() === 'jefaturas') &&
+          newData.child('puntajeTotal').isNumber() &&
+          newData.child('puntajeTotal').val() >= 0 &&
+          newData.child('puntajeTotal').val() <= 100 &&
+          newData.child('evaluadorId').val() === auth.uid
+        )"
+      }
+    },
+
+    "evaluacionesDesempenoFiles": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+      "$evalId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('evaluacionesDesempeno').child($evalId).child('evaluadorId').val() === auth.uid
+        )",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('evaluacionesDesempeno').child($evalId).child('evaluadorId').val() === auth.uid
+        )",
+        ".validate": "!newData.exists() || newData.hasChildren(['pdfBase64'])",
+        "pdfBase64": {
+          ".validate": "newData.isString() && newData.val().length >= 20 && newData.val().length <= 6000000"
+        }
+      }
+    },
+
+    "evaluacionesByEvaluador": {
+      "$uid": {
+        ".read": "auth != null && (auth.uid === $uid || (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'))",
+        "$evalId": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            auth.uid === $uid
+          )",
+          ".validate": "!newData.exists() || newData.val() === true"
+        }
+      }
+    },
+
+    "evaluacionesByPeriodo": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+      "$periodo": {
+        "$tipo": {
+          "$evalId": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+              root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+              (
+                !data.exists() &&
+                newData.val() === true &&
+                root.child('evaluacionesDesempeno').child($evalId).child('evaluadorId').val() === auth.uid
+              )
+            )",
+            ".validate": "!newData.exists() || newData.val() === true"
+          }
+        }
+      }
+    },
+
+    "evaluacionesUnique": {
+      "$uniqueKey": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          !data.exists() &&
+          newData.val() === true &&
+          (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado' ||
+            root.child('users').child(auth.uid).child('rol').val() === 'empleado'
+          )
+        )",
+        ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+
+    "departamentos": {
+      ".read": "auth != null",
+      "$depId": {
+        ".write": "auth != null && (
+          root.child('users').child(auth.uid).exists() &&
+          root.child('users').child(auth.uid).child('rol').val() === 'admin'
+        )",
+        ".validate": "newData.hasChildren(['codigo', 'nombre', 'color', 'icono', 'fechaCreacion', 'activo'])",
+        "codigo": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50"
+        },
+        "nombre": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+        },
+        "color": {
+          ".validate": "newData.isString() && newData.val().matches(/^#[0-9A-Fa-f]{6}$/)"
+        },
+        "icono": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100"
+        },
+        "categorias": {
+          ".validate": "!newData.exists() || newData.isString() || newData.hasChildren()"
+        },
+        "activo": {
+          ".validate": "newData.isBoolean()"
+        },
+        "fechaCreacion": {
+          ".validate": "newData.isString()"
+        },
+        "fechaActualizacion": {
+          ".validate": "newData.isString()"
+        }
+      }
+    }
+  }
+}

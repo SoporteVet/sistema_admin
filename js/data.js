@@ -302,6 +302,363 @@ const ROLES = {
 };
 
 // ============================================================
+// EVALUACIONES DE DESEMPEÑO (semestral)
+// ============================================================
+const EVALUACION_ESCALA = {
+    min: 0,
+    max: 5,
+    etiquetas: {
+        5: 'Excelente — supera lo esperado',
+        4: 'Muy bueno — cumple muy bien',
+        3: 'Bueno — cumple lo esperado',
+        2: 'Regular — necesita mejorar',
+        1: 'Deficiente — no cumple adecuadamente',
+        0: 'No aplica o no hay evidencia suficiente'
+    }
+};
+
+const EVALUACION_CLASIFICACION = [
+    { min: 90, max: 100, categoria: 'Excelente', sugerenciaPersonal: 'Aumento preferencial', sugerenciaJefaturas: 'Aumento preferencial / reconocimiento de liderazgo' },
+    { min: 80, max: 89, categoria: 'Muy bueno', sugerenciaPersonal: 'Aumento recomendado', sugerenciaJefaturas: 'Aumento recomendado' },
+    { min: 70, max: 79, categoria: 'Bueno', sugerenciaPersonal: 'Aumento básico o moderado', sugerenciaJefaturas: 'Aumento básico o moderado' },
+    { min: 60, max: 69, categoria: 'Regular', sugerenciaPersonal: 'Plan de mejora, sin aumento o aumento mínimo', sugerenciaJefaturas: 'Plan de mejora en liderazgo' },
+    { min: 0, max: 59, categoria: 'Deficiente', sugerenciaPersonal: 'No aplica al aumento', sugerenciaJefaturas: 'No aplica al aumento / revisión del puesto de jefatura' }
+];
+
+const EVALUACION_DESEMPENO_CONFIG = {
+    escala: EVALUACION_ESCALA,
+    personal: {
+        titulo: 'Evaluación de desempeño del personal',
+        puntajeMaximo: 100,
+        secciones: [
+            {
+                id: 'A', nombre: 'Puntualidad y asistencia', maxSeccion: 15,
+                criterios: [
+                    { id: 'A1', texto: 'Cumple con su horario de entrada y salida', max: 5 },
+                    { id: 'A2', texto: 'No presenta ausencias injustificadas', max: 5 },
+                    { id: 'A3', texto: 'Respeta descansos, turnos asignados y cambios autorizados', max: 5 }
+                ]
+            },
+            {
+                id: 'B', nombre: 'Cumplimiento de funciones', maxSeccion: 20,
+                criterios: [
+                    { id: 'B1', texto: 'Cumple correctamente las funciones propias de su puesto', max: 5 },
+                    { id: 'B2', texto: 'Finaliza sus tareas sin necesidad de supervisión constante', max: 5 },
+                    { id: 'B3', texto: 'Sigue protocolos internos del área', max: 5 },
+                    { id: 'B4', texto: 'Mantiene orden, limpieza y responsabilidad en su área de trabajo', max: 5 }
+                ]
+            },
+            {
+                id: 'C', nombre: 'Calidad del trabajo', maxSeccion: 15,
+                criterios: [
+                    { id: 'C1', texto: 'Realiza su trabajo con cuidado y atención al detalle', max: 5 },
+                    { id: 'C2', texto: 'Comete pocos errores o corrige oportunamente', max: 5 },
+                    { id: 'C3', texto: 'Mantiene calidad incluso en momentos de alta carga laboral', max: 5 }
+                ]
+            },
+            {
+                id: 'D', nombre: 'Actitud y trabajo en equipo', maxSeccion: 15,
+                criterios: [
+                    { id: 'D1', texto: 'Mantiene una actitud positiva y colaborativa', max: 5 },
+                    { id: 'D2', texto: 'Respeta a compañeros, clientes y jefaturas', max: 5 },
+                    { id: 'D3', texto: 'Ayuda al equipo y evita generar conflictos', max: 5 }
+                ]
+            },
+            {
+                id: 'E', nombre: 'Comunicación interna', maxSeccion: 10,
+                criterios: [
+                    { id: 'E1', texto: 'Informa problemas, pendientes o situaciones importantes a tiempo', max: 4 },
+                    { id: 'E2', texto: 'Usa adecuadamente los canales internos: radio, Argus, correo, WhatsApp laboral u otros', max: 3 },
+                    { id: 'E3', texto: 'Se comunica con respeto, claridad y profesionalismo', max: 3 }
+                ]
+            },
+            {
+                id: 'F', nombre: 'Servicio al cliente y trato al paciente', maxSeccion: 10,
+                criterios: [
+                    { id: 'F1', texto: 'Brinda buen trato a los clientes', max: 3 },
+                    { id: 'F2', texto: 'Trata a los pacientes con cuidado, respeto y empatía', max: 4 },
+                    { id: 'F3', texto: 'Evita quejas por mala atención, descuido o falta de comunicación', max: 3 }
+                ]
+            },
+            {
+                id: 'G', nombre: 'Iniciativa y mejora continua', maxSeccion: 10,
+                criterios: [
+                    { id: 'G1', texto: 'Propone soluciones o mejoras cuando detecta problemas', max: 4 },
+                    { id: 'G2', texto: 'Aprende nuevas funciones o mejora sus habilidades', max: 3 },
+                    { id: 'G3', texto: 'Se adapta positivamente a cambios de procesos o instrucciones', max: 3 }
+                ]
+            },
+            {
+                id: 'H', nombre: 'Compromiso, confidencialidad y normas internas', maxSeccion: 5,
+                criterios: [
+                    { id: 'H1', texto: 'Cumple normas internas, confidencialidad, uso adecuado de celular, maletines, equipos, medicamentos, documentos y recursos de la veterinaria', max: 5 }
+                ]
+            }
+        ],
+        decisionesAdministrativas: [
+            { id: 'aplica_aumento', label: 'Aplica para aumento salarial' },
+            { id: 'aplica_aumento_moderado', label: 'Aplica para aumento salarial moderado' },
+            { id: 'no_aplica', label: 'No aplica por el momento' },
+            { id: 'plan_mejora', label: 'Requiere plan de mejora' },
+            { id: 'seguimiento_disciplinario', label: 'Requiere seguimiento disciplinario o administrativo' }
+        ],
+        labelsCualitativos: {
+            fortalezas: 'Fortalezas del colaborador',
+            areasMejora: 'Áreas de mejora',
+            recomendaciones: 'Recomendaciones de la jefatura'
+        }
+    },
+    jefaturas: {
+        titulo: 'Evaluación de desempeño para jefaturas',
+        puntajeMaximo: 100,
+        secciones: [
+            {
+                id: 'A', nombre: 'Cumplimiento de objetivos del área', maxSeccion: 20,
+                criterios: [
+                    { id: 'A1', texto: 'El área cumple adecuadamente sus funciones principales', max: 5 },
+                    { id: 'A2', texto: 'Se reducen errores, atrasos, quejas o problemas operativos', max: 5 },
+                    { id: 'A3', texto: 'Organiza adecuadamente al personal y la distribución de tareas', max: 5 },
+                    { id: 'A4', texto: 'Da seguimiento a pendientes importantes del área', max: 5 }
+                ]
+            },
+            {
+                id: 'B', nombre: 'Liderazgo y manejo del equipo', maxSeccion: 20,
+                criterios: [
+                    { id: 'B1', texto: 'Da instrucciones claras, respetuosas y oportunas', max: 5 },
+                    { id: 'B2', texto: 'Corrige errores con firmeza, respeto y objetividad', max: 5 },
+                    { id: 'B3', texto: 'Evita favoritismos y aplica las normas de forma equitativa', max: 5 },
+                    { id: 'B4', texto: 'Promueve un ambiente laboral sano y ordenado', max: 5 }
+                ]
+            },
+            {
+                id: 'C', nombre: 'Supervisión y control del área', maxSeccion: 15,
+                criterios: [
+                    { id: 'C1', texto: 'Supervisa que los protocolos se cumplan', max: 5 },
+                    { id: 'C2', texto: 'Detecta problemas antes de que se agraven', max: 5 },
+                    { id: 'C3', texto: 'Documenta reportes, errores, mejoras o situaciones relevantes', max: 5 }
+                ]
+            },
+            {
+                id: 'D', nombre: 'Comunicación con administración y otras áreas', maxSeccion: 15,
+                criterios: [
+                    { id: 'D1', texto: 'Informa a administración los problemas importantes a tiempo', max: 5 },
+                    { id: 'D2', texto: 'Coordina adecuadamente con otras áreas de la veterinaria', max: 5 },
+                    { id: 'D3', texto: 'Brinda reportes claros, verificables y oportunos', max: 5 }
+                ]
+            },
+            {
+                id: 'E', nombre: 'Resolución de conflictos', maxSeccion: 10,
+                criterios: [
+                    { id: 'E1', texto: 'Maneja conflictos sin favoritismos', max: 4 },
+                    { id: 'E2', texto: 'Escucha ambas partes antes de tomar decisiones', max: 3 },
+                    { id: 'E3', texto: 'Busca soluciones prácticas y evita que los problemas escalen', max: 3 }
+                ]
+            },
+            {
+                id: 'F', nombre: 'Cumplimiento de políticas internas y ejemplo personal', maxSeccion: 10,
+                criterios: [
+                    { id: 'F1', texto: 'Aplica las normas internas de forma pareja y objetiva', max: 4 },
+                    { id: 'F2', texto: 'Da el ejemplo en puntualidad, respeto, responsabilidad y actitud', max: 3 },
+                    { id: 'F3', texto: 'Respeta los lineamientos de administración, RRHH y gerencia', max: 3 }
+                ]
+            },
+            {
+                id: 'G', nombre: 'Desarrollo y acompañamiento del personal', maxSeccion: 10,
+                criterios: [
+                    { id: 'G1', texto: 'Capacita, orienta o guía al personal bajo su cargo', max: 3 },
+                    { id: 'G2', texto: 'Identifica colaboradores con potencial o necesidades de mejora', max: 3 },
+                    { id: 'G3', texto: 'Da seguimiento a planes de mejora, errores o necesidades del equipo', max: 4 }
+                ]
+            }
+        ],
+        decisionesAdministrativas: [
+            { id: 'aplica_aumento', label: 'Aplica para aumento salarial' },
+            { id: 'aplica_aumento_moderado', label: 'Aplica para aumento salarial moderado' },
+            { id: 'no_aplica', label: 'No aplica por el momento' },
+            { id: 'plan_mejora_jefatura', label: 'Requiere plan de mejora como jefatura' },
+            { id: 'capacitacion_liderazgo', label: 'Requiere capacitación en liderazgo, comunicación o manejo de personal' },
+            { id: 'revision_continuidad', label: 'Requiere revisión de continuidad como jefatura' }
+        ],
+        labelsCualitativos: {
+            fortalezas: 'Fortalezas de la jefatura',
+            areasMejora: 'Áreas de mejora',
+            recomendaciones: 'Recomendaciones administrativas'
+        }
+    }
+};
+
+function getPlantillaEvaluacion(tipo) {
+    return EVALUACION_DESEMPENO_CONFIG[tipo] || null;
+}
+
+function getPeriodoSemestreActual(fecha = new Date()) {
+    const y = fecha.getFullYear();
+    const s = fecha.getMonth() < 6 ? 'S1' : 'S2';
+    return `${y}-${s}`;
+}
+
+function getPeriodoSemestreLabel(periodoSemestre) {
+    if (!periodoSemestre) return '';
+    const m = /^(\d{4})-(S1|S2)$/.exec(String(periodoSemestre));
+    if (!m) return periodoSemestre;
+    return m[2] === 'S1' ? `${m[1]} — 1.er semestre (ene–jun)` : `${m[1]} — 2.º semestre (jul–dic)`;
+}
+
+function getPeriodoSemestreRango(periodoSemestre) {
+    const m = /^(\d{4})-(S1|S2)$/.exec(String(periodoSemestre || ''));
+    if (!m) return { desde: '', hasta: '' };
+    const y = m[1];
+    if (m[2] === 'S1') return { desde: `${y}-01-01`, hasta: `${y}-06-30` };
+    return { desde: `${y}-07-01`, hasta: `${y}-12-31` };
+}
+
+function calcularClasificacionDesempeno(tipo, puntajeTotal) {
+    const n = Number(puntajeTotal);
+    const row = EVALUACION_CLASIFICACION.find((r) => n >= r.min && n <= r.max);
+    if (!row) return { categoria: '—', resultadoSugerido: '—' };
+    return {
+        categoria: row.categoria,
+        resultadoSugerido: tipo === 'jefaturas' ? row.sugerenciaJefaturas : row.sugerenciaPersonal
+    };
+}
+
+function calcularPuntajeEvaluacion(tipo, respuestas, observacionesSecciones = {}) {
+    const plantilla = getPlantillaEvaluacion(tipo);
+    if (!plantilla) return { puntajeTotal: 0, desgloseSecciones: {}, clasificacion: { categoria: '—', resultadoSugerido: '—' } };
+    const resp = respuestas || {};
+    const desgloseSecciones = {};
+    let puntajeTotal = 0;
+    plantilla.secciones.forEach((sec) => {
+        let subtotal = 0;
+        sec.criterios.forEach((c) => {
+            const v = Number(resp[c.id]);
+            if (!Number.isNaN(v) && v >= 0) subtotal += Math.min(v, c.max);
+        });
+        desgloseSecciones[sec.id] = {
+            nombre: sec.nombre,
+            subtotal,
+            max: sec.maxSeccion,
+            observaciones: String(observacionesSecciones[sec.id] || '').trim()
+        };
+        puntajeTotal += subtotal;
+    });
+    const clasificacion = calcularClasificacionDesempeno(tipo, puntajeTotal);
+    return { puntajeTotal, desgloseSecciones, clasificacion };
+}
+
+function buildEvaluacionUniqueKey(tipo, periodoSemestre, evaluadorId, evaluadoId) {
+    return `${tipo}_${periodoSemestre}_${evaluadorId}_${evaluadoId}`.replace(/[.#$\[\]]/g, '_');
+}
+
+/**
+ * Jefaturas designadas por departamento para evaluaciones de desempeño (tipo jefaturas).
+ * Además de usuarios con rol encargado, estas personas pueden ser evaluadas por el personal del área.
+ */
+const JEFATURAS_EVALUACION_DESEMPENO = {
+    'TI-500': [
+        {
+            nombreCompleto: 'Aarón Moisés Torrez Moraga',
+            puesto: 'Jefatura — Tecnologías de Información'
+        }
+    ]
+};
+
+/** No aparecen en evaluación de desempeño del personal (nombre completo). */
+const EXCLUIDOS_EVAL_PERSONAL = [
+    'Kharen Moreno'
+];
+
+function normalizeNombrePersona(nombre, apellido) {
+    return `${nombre || ''} ${apellido || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function usuarioCoincideNombreCompleto(user, nombreCompleto) {
+    if (!user || !nombreCompleto) return false;
+    const full = normalizeNombrePersona(user.nombre, user.apellido);
+    const target = String(nombreCompleto).trim().replace(/\s+/g, ' ').toLowerCase();
+    return full === target;
+}
+
+function usuarioExcluidoEvalPersonal(user) {
+    if (!user) return true;
+    return EXCLUIDOS_EVAL_PERSONAL.some((nombre) => usuarioCoincideNombreCompleto(user, nombre));
+}
+
+function usuarioCoincideJefaturaConfig(user, configEntry) {
+    if (!user || !configEntry) return false;
+    const full = normalizeNombrePersona(user.nombre, user.apellido);
+    const target = String(configEntry.nombreCompleto || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    if (!target) return false;
+    return full === target;
+}
+
+function usuarioEsJefaturaDepartamento(user, codigoDepartamento) {
+    if (!user || !codigoDepartamento || user.activo === false) return false;
+    if (user.rol === 'encargado' && user.departamento === codigoDepartamento) return true;
+    const lista = JEFATURAS_EVALUACION_DESEMPENO[codigoDepartamento] || [];
+    return lista.some((j) => usuarioCoincideJefaturaConfig(user, j));
+}
+
+function usuarioEsJefaturaEvaluable(user) {
+    if (!user || user.activo === false) return false;
+    if (user.rol === 'encargado') return true;
+    return Object.keys(JEFATURAS_EVALUACION_DESEMPENO).some((dep) =>
+        usuarioEsJefaturaDepartamento(user, dep));
+}
+
+function getJefaturasEvaluablesEnDepartamento(codigoDepartamento, users, excludeUserId) {
+    const map = new Map();
+    (users || []).forEach((u) => {
+        if (!u.activo || u.id === excludeUserId) return;
+        if (usuarioEsJefaturaDepartamento(u, codigoDepartamento)) map.set(u.id, u);
+    });
+    return [...map.values()];
+}
+
+function getAllJefaturasEvaluables(users, excludeUserId) {
+    const map = new Map();
+    (users || []).forEach((u) => {
+        if (!u.activo || u.id === excludeUserId) return;
+        if (usuarioEsJefaturaEvaluable(u)) map.set(u.id, u);
+    });
+    return [...map.values()];
+}
+
+function getPuestoJefaturaConfig(user, codigoDepartamento) {
+    const lista = JEFATURAS_EVALUACION_DESEMPENO[codigoDepartamento] || [];
+    const hit = lista.find((j) => usuarioCoincideJefaturaConfig(user, j));
+    return hit?.puesto || user?.puesto || '';
+}
+
+/** Puede recibir evaluación de desempeño del personal (empleados + jefaturas, salvo excluidos). */
+function usuarioEvaluableDesempenoPersonal(user) {
+    if (!user || user.activo === false || usuarioExcluidoEvalPersonal(user)) return false;
+    if (user.rol === 'empleado') return true;
+    return usuarioEsJefaturaEvaluable(user);
+}
+
+function usuarioEvaluablePersonalEnDepartamentos(user, codigosDepartamento) {
+    if (!usuarioEvaluableDesempenoPersonal(user)) return false;
+    const deps = codigosDepartamento || [];
+    if (user.rol === 'empleado') return deps.includes(user.departamento);
+    return deps.some((dep) => usuarioEsJefaturaDepartamento(user, dep));
+}
+
+function getEvaluadosPersonalEnDepartamentos(codigosDepartamento, users, excludeUserId) {
+    const map = new Map();
+    (users || []).forEach((u) => {
+        if (!u.activo || u.id === excludeUserId) return;
+        if (usuarioEvaluablePersonalEnDepartamentos(u, codigosDepartamento)) map.set(u.id, u);
+    });
+    return [...map.values()];
+}
+
+function getAllEvaluadosPersonal(users, excludeUserId) {
+    return (users || []).filter((u) =>
+        u.activo && u.id !== excludeUserId && usuarioEvaluableDesempenoPersonal(u));
+}
+
+// ============================================================
 // TIPOS DE SOLICITUDES
 // ============================================================
 const TIPOS_SOLICITUD = {
