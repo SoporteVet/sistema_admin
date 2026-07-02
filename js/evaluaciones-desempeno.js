@@ -250,13 +250,16 @@ class EvaluacionesDesempenoManager {
             tieneAdjunto: false
         };
 
-        const updates = {};
-        updates[`evaluacionesDesempeno/${evalId}`] = record;
-        updates[`evaluacionesByEvaluador/${user.id}/${evalId}`] = true;
-        updates[`evaluacionesByPeriodo/${periodoSemestre}/${tipo}/${evalId}`] = true;
-        updates[`evaluacionesUnique/${uniqueKey}`] = true;
-
-        await db.ref().update(updates);
+        // Escritura en dos pasos: evaluacionesByPeriodo valida contra evaluacionesDesempeno,
+        // y en un update multi-ruta ese registro aún no existe al evaluar las reglas.
+        await db.ref().update({
+            [`evaluacionesDesempeno/${evalId}`]: record,
+            [`evaluacionesByEvaluador/${user.id}/${evalId}`]: true,
+            [`evaluacionesUnique/${uniqueKey}`]: true
+        });
+        await db.ref().update({
+            [`evaluacionesByPeriodo/${periodoSemestre}/${tipo}/${evalId}`]: true
+        });
 
         if (payload.file) {
             await this._guardarAdjunto(evalId, payload.file, record);
