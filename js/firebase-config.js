@@ -49,7 +49,8 @@ const dbRef = {
     evaluacionesDesempenoFiles: db.ref('evaluacionesDesempenoFiles'),
     evaluacionesByEvaluador: db.ref('evaluacionesByEvaluador'),
     evaluacionesByPeriodo: db.ref('evaluacionesByPeriodo'),
-    evaluacionesUnique: db.ref('evaluacionesUnique')
+    evaluacionesUnique: db.ref('evaluacionesUnique'),
+    evaluacionesJefaturasCatalog: db.ref('evaluacionesJefaturasCatalog')
 };
 
 console.log('🔥 Firebase inicializado correctamente');

@@ -113,6 +113,7 @@ class App {
         this.refreshSanctionSharedNavItem();
         this._depsLoaded = false;
         this.ensureDepsLoaded();
+        EvaluacionesDesempenoManager.syncJefaturasCatalog();
         this.navigate('dashboard');
     }
 
@@ -1446,8 +1447,9 @@ class App {
                     <p style="color:var(--text-secondary);font-size:0.9rem;margin-bottom:16px;">
                         Evaluaciones <strong>semestrales</strong>. Periodo activo: <strong>${App.escapeHtml(getPeriodoSemestreLabel(periodo))}</strong>.
                         ${AuthManager.isAdmin() ? 'Como administrador ve todas las evaluaciones.' : ''}
-                        ${user.rol === 'encargado' ? 'Puede ver las evaluaciones de personal que usted realizó.' : ''}
-                        ${user.rol === 'empleado' ? 'Puede ver las evaluaciones a jefaturas que usted envió.' : ''}
+                        ${usuarioPuedeEvaluarPersonalDesempeno(user) && user.rol !== 'admin' ? 'Puede ver las evaluaciones de personal que usted realizó.' : ''}
+                        ${user.rol === 'empleado' && !usuarioPuedeEvaluarPersonalDesempeno(user) ? 'Puede ver las evaluaciones a jefaturas que usted envió.' : ''}
+                        ${user.rol === 'empleado' && usuarioPuedeEvaluarPersonalDesempeno(user) ? 'Puede evaluar personal a su cargo y ver esas evaluaciones; también puede calificar jefaturas de su área.' : ''}
                     </p>
                     <div class="tabs" style="margin-bottom:16px;">${tabsHtml}</div>
                     <div class="table-container">
@@ -1671,8 +1673,9 @@ class App {
         ).join('') : '';
 
         content.innerHTML = `
-            <div style="margin-bottom:16px;">
+            <div style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
                 <button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('evaluaciones-desempeno', { tab: '${App.escapeHtml(ev.tipo)}' })"><i class="fas fa-arrow-left"></i> Volver</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="App.generateEvaluacionDesempenoPDF('${App.escapeJsString(id)}')"><i class="fas fa-file-pdf"></i> Generar PDF</button>
             </div>
             <div class="card" style="margin-bottom:16px;">
                 <div class="card-header">
@@ -1723,6 +1726,26 @@ class App {
             setTimeout(() => URL.revokeObjectURL(url), 120000);
         } catch (e) {
             Toast.error('Error', e.message || 'No se pudo abrir el PDF');
+        }
+    }
+
+    static async generateEvaluacionDesempenoPDF(id) {
+        try {
+            const ev = await EvaluacionesDesempenoManager.getById(id);
+            if (!ev || !EvaluacionesDesempenoManager.puedeVer(ev)) {
+                Toast.error('Error', 'No puede generar PDF de esta evaluación');
+                return;
+            }
+            await App.ensureDepsLoaded();
+            Toast.info('Generando PDF', 'Por favor espere...');
+            const result = await PDFGenerator.generateEvaluacionDesempenoPDF(ev);
+            if (result.success) {
+                Toast.success('PDF generado', result.fileName);
+            } else {
+                Toast.error('Error', result.message || 'No se pudo generar el PDF');
+            }
+        } catch (e) {
+            Toast.error('Error', e.message || 'No se pudo generar el PDF');
         }
     }
 

@@ -213,6 +213,27 @@ class AuthManager {
     // CRUD de Usuarios (Admin)
     // ========================================================
 
+    static async getUsersByDepartamentos(deps) {
+        const map = new Map();
+        const uniqueDeps = [...new Set((deps || []).filter(Boolean))];
+        for (const dep of uniqueDeps) {
+            try {
+                const snap = await dbRef.users.orderByChild('departamento').equalTo(dep).once('value');
+                snapshotToArray(snap).forEach((u) => map.set(u.id, u));
+            } catch (error) {
+                console.warn('getUsersByDepartamentos:', dep, error.code || error.message);
+            }
+        }
+        return [...map.values()];
+    }
+
+    /** Lista de usuarios para evaluaciones (lista completa o consulta por departamento). */
+    static async getUsersForEvaluacionDesempeno(deps) {
+        let users = await this.getAllUsers();
+        if (users?.length) return users;
+        return this.getUsersByDepartamentos(deps);
+    }
+
     // Obtener todos los usuarios
     static async getAllUsers() {
         try {

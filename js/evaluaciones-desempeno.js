@@ -4,6 +4,59 @@
 // ============================================================
 
 class EvaluacionesDesempenoManager {
+    static async syncJefaturasCatalog() {
+        const user = AuthManager.getUser();
+        if (!user || (!AuthManager.isAdmin() && user.rol !== 'encargado')) return;
+
+        try {
+            const all = await AuthManager.getAllUsers();
+            if (!all?.length) return;
+
+            const updates = {};
+            Object.keys(JEFATURAS_POR_DEPARTAMENTO).forEach((dep) => {
+                const map = new Map();
+                getJefaturasEvaluablesEnDepartamento(dep, all, null).forEach((u) => map.set(u.id, u));
+                _resolverUsuariosJefaturasConfig([dep], all, null).forEach((u, id) => map.set(id, u));
+                if (!map.size) return;
+                const uids = {};
+                map.forEach((_, id) => { uids[id] = true; });
+                updates[`evaluacionesJefaturasCatalog/${dep}`] = uids;
+            });
+
+            if (Object.keys(updates).length) {
+                await db.ref().update(updates);
+            }
+        } catch (e) {
+            console.warn('EvaluacionesDesempeno syncJefaturasCatalog:', e);
+        }
+    }
+
+    static async _loadUsersForJefaturasEval(evaluador, excludeUserId) {
+        const depsMap = typeof App !== 'undefined' ? App._depsMap : null;
+        const deps = getDepartamentosEvaluadorJefaturas(evaluador, depsMap);
+        const userMap = new Map();
+
+        for (const dep of deps) {
+            try {
+                const snap = await dbRef.evaluacionesJefaturasCatalog.child(dep).once('value');
+                const uids = Object.keys(snap.val() || {});
+                for (const uid of uids) {
+                    if (uid === excludeUserId) continue;
+                    const u = await AuthManager.getUserById(uid);
+                    if (u && u.activo !== false) userMap.set(uid, u);
+                }
+            } catch (e) {
+                console.warn('EvaluacionesDesempeno catalog read:', dep, e);
+            }
+        }
+
+        const all = await AuthManager.getUsersForEvaluacionDesempeno(deps);
+        getJefaturasEvaluablesParaEvaluador(evaluador, all, excludeUserId, depsMap)
+            .forEach((u) => userMap.set(u.id, u));
+
+        return [...userMap.values()];
+    }
+
     static async getById(id) {
         try {
             const snap = await dbRef.evaluacionesDesempeno.child(id).once('value');
@@ -20,8 +73,11 @@ class EvaluacionesDesempenoManager {
         if (!user || !evaluacion) return false;
         if (AuthManager.isAdmin()) return true;
         if (evaluacion.evaluadorId !== user.id) return false;
-        if (user.rol === 'encargado' && evaluacion.tipo === 'personal') return true;
-        if (user.rol === 'empleado' && evaluacion.tipo === 'jefaturas') return true;
+        if (evaluacion.tipo === 'personal' &&
+            (user.rol === 'encargado' || usuarioPuedeEvaluarPersonalDesempeno(user))) {
+            return true;
+        }
+        if (evaluacion.tipo === 'jefaturas' && user.rol === 'empleado') return true;
         return false;
     }
 
@@ -29,7 +85,7 @@ class EvaluacionesDesempenoManager {
         const user = AuthManager.getUser();
         if (!user) return false;
         if (AuthManager.isAdmin()) return tipo === 'personal' || tipo === 'jefaturas';
-        if (user.rol === 'encargado' && tipo === 'personal') return true;
+        if (tipo === 'personal' && usuarioPuedeEvaluarPersonalDesempeno(user)) return true;
         if (user.rol === 'empleado' && tipo === 'jefaturas') return true;
         return false;
     }
@@ -47,13 +103,14 @@ class EvaluacionesDesempenoManager {
             return usuarioEsJefaturaEvaluable(evaluado);
         }
 
-        if (tipo === 'personal' && user.rol === 'encargado') {
-            const deps = AuthManager.getDepartamentosEncargado(user);
+        if (tipo === 'personal' && usuarioPuedeEvaluarPersonalDesempeno(user)) {
+            const deps = getDepartamentosEvaluadorPersonalDesempeno(user);
             return usuarioEvaluablePersonalEnDepartamentos(evaluado, deps);
         }
 
         if (tipo === 'jefaturas' && user.rol === 'empleado') {
-            return usuarioEsJefaturaDepartamento(evaluado, user.departamento);
+            const depsMap = typeof App !== 'undefined' ? App._depsMap : null;
+            return evaluadorPuedeEvaluarJefatura(user, evaluado, depsMap);
         }
 
         return false;
@@ -252,7 +309,19 @@ class EvaluacionesDesempenoManager {
         const user = AuthManager.getUser();
         if (!user || !this.puedeCrearTipo(tipo)) return [];
 
-        const users = await AuthManager.getAllUsers();
+        if (tipo === 'jefaturas' && (AuthManager.isAdmin() || user.rol === 'encargado')) {
+            await this.syncJefaturasCatalog();
+        }
+
+        const depsMap = typeof App !== 'undefined' ? App._depsMap : null;
+
+        if (tipo === 'jefaturas' && user.rol === 'empleado') {
+            return this._loadUsersForJefaturasEval(user, user.id);
+        }
+
+        const users = await AuthManager.getUsersForEvaluacionDesempeno(
+            getDepartamentosEvaluadorJefaturas(user, depsMap)
+        );
         const activos = (users || []).filter((u) => u.activo && u.id !== user.id);
 
         if (AuthManager.isAdmin()) {
@@ -260,13 +329,9 @@ class EvaluacionesDesempenoManager {
             return getAllJefaturasEvaluables(activos, user.id);
         }
 
-        if (tipo === 'personal' && user.rol === 'encargado') {
-            const deps = AuthManager.getDepartamentosEncargado(user);
+        if (tipo === 'personal' && usuarioPuedeEvaluarPersonalDesempeno(user)) {
+            const deps = getDepartamentosEvaluadorPersonalDesempeno(user);
             return getEvaluadosPersonalEnDepartamentos(deps, activos, user.id);
-        }
-
-        if (tipo === 'jefaturas' && user.rol === 'empleado') {
-            return getJefaturasEvaluablesEnDepartamento(user.departamento, activos, user.id);
         }
 
         return [];

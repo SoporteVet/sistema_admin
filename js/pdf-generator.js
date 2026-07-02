@@ -1374,4 +1374,344 @@ class PDFGenerator {
                 };
         }
     }
+
+    /** Generar PDF de evaluación de desempeño semestral (formato con cuadros y tablas) */
+    static async generateEvaluacionDesempenoPDF(ev) {
+        try {
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const pageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 14;
+            const contentWidth = pageWidth - (margin * 2);
+            const state = { y: margin, pageWidth, pageHeight, margin, contentWidth };
+
+            const plantilla = getPlantillaEvaluacion(ev.tipo);
+            const depMap = (typeof App !== 'undefined' && App._depsMap) ? App._depsMap : {};
+            const depNombre = depMap[ev.evaluadoDepartamento]?.nombre
+                || DEPARTAMENTOS[ev.evaluadoDepartamento]?.nombre
+                || ev.evaluadoDepartamento
+                || '—';
+
+            this._evalPdfRenderPageHeader(pdf, state, plantilla?.titulo || 'Evaluación de desempeño');
+            this._evalPdfDrawMetaBox(pdf, state, ev, depNombre);
+            this._evalPdfDrawScoreBox(pdf, state, ev);
+
+            (plantilla?.secciones || []).forEach((sec) => {
+                this._evalPdfDrawSectionBox(pdf, state, sec, ev);
+            });
+
+            const labels = plantilla?.labelsCualitativos || {};
+            const cualitativo = [
+                [labels.fortalezas || 'Fortalezas', ev.fortalezas],
+                [labels.areasMejora || 'Áreas de mejora', ev.areasMejora],
+                [labels.recomendaciones || 'Recomendaciones', ev.recomendaciones]
+            ].filter(([, text]) => text);
+            if (cualitativo.length) {
+                this._evalPdfDrawCommentsBox(pdf, state, 'Comentarios cualitativos', cualitativo);
+            }
+
+            if (ev.decisionAdministrativa || ev.observacionAdministracion) {
+                const dec = (plantilla?.decisionesAdministrativas || [])
+                    .find((d) => d.id === ev.decisionAdministrativa);
+                const adminLines = [];
+                if (ev.decisionAdministrativa) {
+                    adminLines.push(['Decisión', dec?.label || ev.decisionAdministrativa]);
+                }
+                if (ev.observacionAdministracion) {
+                    adminLines.push(['Observación', ev.observacionAdministracion]);
+                }
+                this._evalPdfDrawCommentsBox(pdf, state, 'Decisión administrativa', adminLines);
+            }
+
+            const totalPages = pdf.internal.getNumberOfPages();
+            for (let i = 1; i <= totalPages; i++) {
+                pdf.setPage(i);
+                pdf.setFontSize(8);
+                pdf.setTextColor(110, 110, 110);
+                pdf.text(`Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: 'center' });
+                pdf.text(`Generado: ${new Date().toLocaleDateString('es-CR')}`, margin, pageHeight - 8);
+            }
+
+            const safeName = (ev.evaluadoNombre || 'evaluacion').replace(/[^\w\s-]/g, '').replace(/\s+/g, '_');
+            const tipoLabel = ev.tipo === 'jefaturas' ? 'Jefaturas' : 'Personal';
+            const fileName = `Evaluacion_${tipoLabel}_${safeName}_${ev.periodoSemestre || 'semestre'}.pdf`;
+            pdf.save(fileName);
+
+            return { success: true, fileName };
+        } catch (error) {
+            console.error('Error generando PDF evaluación:', error);
+            return { success: false, message: error.message };
+        }
+    }
+
+    static _evalPdfEnsureSpace(pdf, state, needed) {
+        if (state.y + needed > state.pageHeight - 16) {
+            pdf.addPage();
+            state.y = state.margin;
+        }
+    }
+
+    static _evalPdfSetStroke(pdf, color = [190, 190, 190], width = 0.25) {
+        pdf.setDrawColor(color[0], color[1], color[2]);
+        pdf.setLineWidth(width);
+    }
+
+    static _evalPdfBoxTitle(pdf, x, y, w, title) {
+        const h = 8;
+        pdf.setFillColor(26, 35, 126);
+        this._evalPdfSetStroke(pdf, [26, 35, 126], 0.2);
+        pdf.rect(x, y, w, h, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(9.5);
+        pdf.setFont(undefined, 'bold');
+        pdf.text(title, x + 3, y + 5.5);
+        pdf.setTextColor(0, 0, 0);
+        return h;
+    }
+
+    static _evalPdfRenderPageHeader(pdf, state, titulo) {
+        const { pageWidth, margin } = state;
+        pdf.setFillColor(26, 35, 126);
+        pdf.rect(0, 0, pageWidth, 26, 'F');
+        pdf.setTextColor(255, 255, 255);
+        pdf.setFontSize(13);
+        pdf.setFont(undefined, 'bold');
+        pdf.text('VETERINARIA SAN MARTÍN DE PORRES', margin, 11);
+        pdf.setFontSize(8.5);
+        pdf.setFont(undefined, 'normal');
+        pdf.text('Evaluación de desempeño semestral', margin, 17);
+
+        state.y = 34;
+        pdf.setTextColor(0, 0, 0);
+        pdf.setFontSize(13);
+        pdf.setFont(undefined, 'bold');
+        pdf.text(titulo, pageWidth / 2, state.y, { align: 'center' });
+        state.y += 10;
+    }
+
+    static _evalPdfDrawMetaBox(pdf, state, ev, depNombre) {
+        const { margin, contentWidth } = state;
+        const labelW = 38;
+        const rowH = 7;
+        const rows = [
+            ['Evaluado', ev.evaluadoNombre || '—'],
+            ['Puesto', ev.evaluadoPuesto || '—'],
+            ['Departamento', depNombre],
+            ['Evaluador', ev.evaluadorNombre || '—'],
+            ['Periodo', getPeriodoSemestreLabel(ev.periodoSemestre)],
+            ['Fecha', ev.fechaEvaluacion || '—']
+        ];
+
+        let boxH = 8;
+        rows.forEach(([, val]) => {
+            const lines = pdf.splitTextToSize(String(val), contentWidth - labelW - 8);
+            boxH += Math.max(rowH, lines.length * 4.5 + 2);
+        });
+
+        this._evalPdfEnsureSpace(pdf, state, boxH + 4);
+        const x = margin;
+        const y = state.y;
+        const titleH = this._evalPdfBoxTitle(pdf, x, y, contentWidth, 'Datos generales');
+
+        let cy = y + titleH;
+        pdf.setFontSize(9);
+        rows.forEach(([label, val], idx) => {
+            const valLines = pdf.splitTextToSize(String(val), contentWidth - labelW - 8);
+            const rh = Math.max(rowH, valLines.length * 4.5 + 2);
+            if (idx % 2 === 0) {
+                pdf.setFillColor(248, 249, 252);
+                pdf.rect(x, cy, contentWidth, rh, 'F');
+            }
+            this._evalPdfSetStroke(pdf);
+            pdf.line(x, cy, x + contentWidth, cy);
+            pdf.setFont(undefined, 'bold');
+            pdf.text(String(label), x + 3, cy + 4.8);
+            pdf.setFont(undefined, 'normal');
+            pdf.text(valLines, x + labelW, cy + 4.8);
+            cy += rh;
+        });
+        this._evalPdfSetStroke(pdf);
+        pdf.rect(x, y, contentWidth, cy - y, 'S');
+
+        state.y = cy + 6;
+    }
+
+    static _evalPdfDrawScoreBox(pdf, state, ev) {
+        const { margin, contentWidth } = state;
+        const boxH = 22;
+        this._evalPdfEnsureSpace(pdf, state, boxH + 4);
+        const x = margin;
+        const y = state.y;
+
+        pdf.setFillColor(232, 245, 233);
+        this._evalPdfSetStroke(pdf, [76, 175, 80], 0.35);
+        pdf.rect(x, y, contentWidth, boxH, 'FD');
+
+        pdf.setFontSize(10);
+        pdf.setFont(undefined, 'bold');
+        pdf.text('Resultado global', x + 4, y + 8);
+        pdf.setFontSize(18);
+        pdf.setTextColor(27, 94, 32);
+        pdf.text(`${ev.puntajeTotal ?? 0} / 100`, x + 4, y + 17);
+        pdf.setTextColor(0, 0, 0);
+
+        pdf.setFontSize(10);
+        pdf.setFont(undefined, 'bold');
+        pdf.text(`Clasificación: ${ev.categoriaResultado || '—'}`, x + contentWidth / 2, y + 10);
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(9);
+        const sugLines = pdf.splitTextToSize(ev.resultadoSugerido || '—', contentWidth / 2 - 8);
+        pdf.text(sugLines, x + contentWidth / 2, y + 16);
+
+        state.y = y + boxH + 6;
+    }
+
+    static _evalPdfDrawSectionBox(pdf, state, sec, ev) {
+        const { margin, contentWidth } = state;
+        const des = ev.desgloseSecciones?.[sec.id] || {};
+        const colCriterio = contentWidth - 28 - 22;
+        const colMax = 22;
+        const colScore = 28;
+        const headerH = 8;
+        const rowPad = 3;
+
+        let bodyH = headerH;
+        (sec.criterios || []).forEach((c) => {
+            const lines = pdf.splitTextToSize(c.texto, colCriterio - 6);
+            bodyH += Math.max(8, lines.length * 4.2 + rowPad * 2);
+        });
+        let obsH = 0;
+        if (des.observaciones) {
+            const obsLines = pdf.splitTextToSize(String(des.observaciones), contentWidth - 10);
+            obsH = obsLines.length * 4.2 + 12;
+        }
+        const titleH = 8;
+        const totalH = titleH + bodyH + obsH + 2;
+
+        this._evalPdfEnsureSpace(pdf, state, Math.min(totalH, 40));
+        const x = margin;
+        let y = state.y;
+        const titleBar = `${sec.id}. ${sec.nombre}  —  Subtotal: ${des.subtotal ?? 0} / ${sec.maxSeccion} pts`;
+        const tH = this._evalPdfBoxTitle(pdf, x, y, contentWidth, titleBar);
+        y += tH;
+
+        const tableTop = y;
+        pdf.setFillColor(230, 233, 245);
+        pdf.rect(x, y, contentWidth, headerH, 'F');
+        this._evalPdfSetStroke(pdf);
+        pdf.rect(x, y, contentWidth, headerH, 'S');
+        pdf.setFontSize(8.5);
+        pdf.setFont(undefined, 'bold');
+        pdf.text('Criterio', x + 3, y + 5.5);
+        pdf.text('Máx.', x + colCriterio + 3, y + 5.5);
+        pdf.text('Calificación', x + colCriterio + colMax + 3, y + 5.5);
+        pdf.line(x + colCriterio, y, x + colCriterio, y + headerH);
+        pdf.line(x + colCriterio + colMax, y, x + colCriterio + colMax, y + headerH);
+        y += headerH;
+
+        pdf.setFont(undefined, 'normal');
+        pdf.setFontSize(8.5);
+        (sec.criterios || []).forEach((c, idx) => {
+            const score = ev.respuestas?.[c.id] ?? '—';
+            const lines = pdf.splitTextToSize(c.texto, colCriterio - 6);
+            const rh = Math.max(8, lines.length * 4.2 + rowPad * 2);
+
+            if (state.y + (y - state.y) + rh + obsH + 10 > state.pageHeight - 16) {
+                this._evalPdfSetStroke(pdf);
+                pdf.rect(x, tableTop, contentWidth, y - tableTop, 'S');
+                pdf.addPage();
+                state.y = state.margin;
+                y = state.y;
+                const contH = this._evalPdfBoxTitle(pdf, x, y, contentWidth, `${titleBar} (cont.)`);
+                y += contH;
+                pdf.setFillColor(230, 233, 245);
+                pdf.rect(x, y, contentWidth, headerH, 'F');
+                this._evalPdfSetStroke(pdf);
+                pdf.rect(x, y, contentWidth, headerH, 'S');
+                pdf.setFont(undefined, 'bold');
+                pdf.setFontSize(8.5);
+                pdf.text('Criterio', x + 3, y + 5.5);
+                pdf.text('Máx.', x + colCriterio + 3, y + 5.5);
+                pdf.text('Calificación', x + colCriterio + colMax + 3, y + 5.5);
+                pdf.line(x + colCriterio, y, x + colCriterio, y + headerH);
+                pdf.line(x + colCriterio + colMax, y, x + colCriterio + colMax, y + headerH);
+                y += headerH;
+                pdf.setFont(undefined, 'normal');
+            }
+
+            if (idx % 2 === 0) {
+                pdf.setFillColor(252, 252, 252);
+                pdf.rect(x, y, contentWidth, rh, 'F');
+            }
+            this._evalPdfSetStroke(pdf);
+            pdf.line(x, y + rh, x + contentWidth, y + rh);
+            pdf.line(x + colCriterio, y, x + colCriterio, y + rh);
+            pdf.line(x + colCriterio + colMax, y, x + colCriterio + colMax, y + rh);
+
+            pdf.text(lines, x + 3, y + 4.5);
+            pdf.text(String(c.max), x + colCriterio + colMax / 2, y + 4.5, { align: 'center' });
+            pdf.setFont(undefined, 'bold');
+            pdf.text(String(score), x + colCriterio + colMax + colScore / 2, y + 4.5, { align: 'center' });
+            pdf.setFont(undefined, 'normal');
+            y += rh;
+        });
+
+        this._evalPdfSetStroke(pdf);
+        pdf.rect(x, tableTop, contentWidth, y - tableTop, 'S');
+
+        if (des.observaciones) {
+            y += 2;
+            const obsBoxH = obsH;
+            this._evalPdfEnsureSpace(pdf, state, obsBoxH);
+            pdf.setFillColor(255, 249, 230);
+            this._evalPdfSetStroke(pdf, [255, 193, 7], 0.3);
+            pdf.rect(x, y, contentWidth, obsBoxH - 2, 'FD');
+            pdf.setFont(undefined, 'bold');
+            pdf.setFontSize(8.5);
+            pdf.text('Observaciones de la sección:', x + 3, y + 5);
+            pdf.setFont(undefined, 'italic');
+            pdf.setFontSize(8.5);
+            const obsLines = pdf.splitTextToSize(String(des.observaciones), contentWidth - 8);
+            pdf.text(obsLines, x + 3, y + 10);
+            pdf.setFont(undefined, 'normal');
+            y += obsBoxH;
+        }
+
+        state.y = y + 5;
+    }
+
+    static _evalPdfDrawCommentsBox(pdf, state, title, items) {
+        const { margin, contentWidth } = state;
+        let innerH = 6;
+        const blocks = items.map(([label, text]) => {
+            const lines = pdf.splitTextToSize(String(text || '—'), contentWidth - 10);
+            return { label, lines, h: lines.length * 4.2 + 10 };
+        });
+        blocks.forEach((b) => { innerH += b.h; });
+
+        this._evalPdfEnsureSpace(pdf, state, innerH + 12);
+        const x = margin;
+        let y = state.y;
+        const tH = this._evalPdfBoxTitle(pdf, x, y, contentWidth, title);
+        y += tH;
+
+        const boxTop = y;
+        pdf.setFontSize(9);
+        blocks.forEach((b, idx) => {
+            if (idx > 0) {
+                this._evalPdfSetStroke(pdf);
+                pdf.line(x, y, x + contentWidth, y);
+            }
+            pdf.setFont(undefined, 'bold');
+            pdf.text(String(b.label), x + 3, y + 5);
+            pdf.setFont(undefined, 'normal');
+            pdf.text(b.lines, x + 3, y + 10);
+            y += b.h;
+        });
+
+        this._evalPdfSetStroke(pdf);
+        pdf.rect(x, state.y, contentWidth, y - state.y, 'S');
+        state.y = y + 6;
+    }
 }

@@ -1,12 +1,10 @@
 {
   "rules": {
     "users": {
-      ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
-        root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-        root.child('users').child(auth.uid).child('rol').val() === 'encargado'
-      )",
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      ".indexOn": ["departamento", "rol"],
       "$uid": {
-        ".read": "auth != null && ($uid === auth.uid || (root.child('users').child(auth.uid).exists() && (root.child('users').child(auth.uid).child('rol').val() === 'admin' || root.child('users').child(auth.uid).child('rol').val() === 'encargado')))",
+        ".read": "auth != null && root.child('users').child(auth.uid).exists()",
         ".write": "auth != null && (
           (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
           ($uid === auth.uid && !data.exists()) ||
@@ -659,6 +657,19 @@
           )
         )",
         ".validate": "!newData.exists() || newData.val() === true"
+      }
+    },
+
+    "evaluacionesJefaturasCatalog": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      "$depId": {
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+        )",
+        "$uid": {
+          ".validate": "!newData.exists() || newData.val() === true"
+        }
       }
     },
 

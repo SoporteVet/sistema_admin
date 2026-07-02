@@ -551,22 +551,73 @@ function buildEvaluacionUniqueKey(tipo, periodoSemestre, evaluadorId, evaluadoId
 }
 
 /**
- * Jefaturas designadas por departamento para evaluaciones de desempeño (tipo jefaturas).
- * Además de usuarios con rol encargado, estas personas pueden ser evaluadas por el personal del área.
+ * Áreas administrativas (gestión de personal por jefaturas designadas).
  */
-const JEFATURAS_EVALUACION_DESEMPENO = {
-    'TI-500': [
-        {
-            nombreCompleto: 'Aarón Moisés Torrez Moraga',
-            puesto: 'Jefatura — Tecnologías de Información'
-        }
+const DEPTOS_PERSONAL_ADMINISTRATIVO = [
+    'TI-500',
+    'DG-100',
+    'DG-F-101',
+    'RH-300',
+    'IN-200',
+    'RC-400'
+];
+
+/** Jefaturas administrativas evaluables en cada área administrativa. */
+const JEFATURAS_ADMIN_POR_AREA = [
+    { nombreCompleto: 'Randall Azofeifa Rodriguez', puesto: 'Jefatura administrativa' },
+    { nombreCompleto: 'Alejandra Cardona', puesto: 'Jefatura administrativa' },
+    { nombreCompleto: 'Luis Coto', puesto: 'Jefatura administrativa' }
+];
+
+/**
+ * Jefaturas evaluables por departamento (tipo jefaturas).
+ * El empleado solo ve las jefaturas configuradas para SU departamento.
+ */
+const JEFATURAS_POR_DEPARTAMENTO = {
+    'TI-500': [...JEFATURAS_ADMIN_POR_AREA],
+    'DG-100': [...JEFATURAS_ADMIN_POR_AREA],
+    'DG-F-101': [...JEFATURAS_ADMIN_POR_AREA],
+    'RH-300': [...JEFATURAS_ADMIN_POR_AREA],
+    'IN-200': [...JEFATURAS_ADMIN_POR_AREA],
+    'RC-400': [...JEFATURAS_ADMIN_POR_AREA],
+    'CE-700': [
+        { nombreCompleto: 'Kharen Moreno', puesto: 'Encargada — Consulta externa' }
     ]
 };
 
-/** No aparecen en evaluación de desempeño del personal (nombre completo). */
-const EXCLUIDOS_EVAL_PERSONAL = [
-    'Kharen Moreno'
+/**
+ * Personas designadas: evalúan personal (tipo personal) en los deptos que gestionan.
+ */
+const JEFATURAS_DESEMPENO_PERSONAS = [
+    {
+        nombreCompleto: 'Randall Azofeifa Rodriguez',
+        puesto: 'Jefatura administrativa',
+        departamentosGestionados: [...DEPTOS_PERSONAL_ADMINISTRATIVO],
+        puedeEvaluarPersonal: true
+    },
+    {
+        nombreCompleto: 'Alejandra Cardona',
+        puesto: 'Jefatura administrativa',
+        departamentosGestionados: [...DEPTOS_PERSONAL_ADMINISTRATIVO],
+        puedeEvaluarPersonal: true
+    },
+    {
+        nombreCompleto: 'Luis Coto',
+        puesto: 'Jefatura administrativa',
+        departamentosGestionados: [...DEPTOS_PERSONAL_ADMINISTRATIVO],
+        puedeEvaluarPersonal: true
+    },
+    {
+        nombreCompleto: 'Kharen Moreno',
+        puesto: 'Encargada — Consulta externa',
+        departamentosGestionados: ['CE-700'],
+        puedeEvaluarPersonal: true,
+        excluirDePersonalComoEvaluado: true
+    }
 ];
+
+/** Índice departamento → jefaturas evaluables (tipo jefaturas). */
+const JEFATURAS_EVALUACION_DESEMPENO = { ...JEFATURAS_POR_DEPARTAMENTO };
 
 function normalizeNombrePersona(nombre, apellido) {
     return `${nombre || ''} ${apellido || ''}`.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -576,32 +627,134 @@ function usuarioCoincideNombreCompleto(user, nombreCompleto) {
     if (!user || !nombreCompleto) return false;
     const full = normalizeNombrePersona(user.nombre, user.apellido);
     const target = String(nombreCompleto).trim().replace(/\s+/g, ' ').toLowerCase();
-    return full === target;
+    if (!full || !target) return false;
+    if (full === target) return true;
+    if (full.startsWith(`${target} `)) return true;
+
+    const targetParts = target.split(' ').filter(Boolean);
+    const userParts = full.split(' ').filter(Boolean);
+    if (targetParts.length >= 2 && userParts.length >= 2) {
+        // Primer nombre + primer apellido (ej. Randall Azofeifa ↔ Randall Azofeifa Rodriguez)
+        if (targetParts[0] === userParts[0] && targetParts[1] === userParts[1]) return true;
+        // Primer nombre + último apellido del objetivo
+        if (targetParts[0] === userParts[0] &&
+            targetParts[targetParts.length - 1] === userParts[userParts.length - 1]) {
+            return true;
+        }
+    }
+
+    // Todos los tokens del objetivo aparecen en orden en el nombre del usuario
+    let ui = 0;
+    for (const part of targetParts) {
+        while (ui < userParts.length && userParts[ui] !== part) ui++;
+        if (ui >= userParts.length) return false;
+        ui++;
+    }
+    return true;
+}
+
+function _nombreDepartamentoEvaluacion(depsMap, codigo) {
+    if (!codigo) return '';
+    const dep = depsMap?.[codigo] || DEPARTAMENTOS[codigo];
+    return String(dep?.nombre || codigo).toLowerCase();
+}
+
+/** Solo el/los departamento(s) propios del evaluador (+ alias consulta externa → CE-700). */
+function getDepartamentosEvaluadorJefaturas(evaluador, depsMap) {
+    const base = _departamentosLaboralesUsuario(evaluador);
+    if (!base.length && evaluador?.departamento) base.push(evaluador.departamento);
+    const expanded = new Set(base);
+    base.forEach((code) => {
+        const nombre = _nombreDepartamentoEvaluacion(depsMap, code);
+        if (nombre.includes('consulta') || nombre.includes('externa') || nombre.includes('médic') || nombre.includes('medic')) {
+            expanded.add('CE-700');
+        }
+    });
+    return [...expanded];
+}
+
+function _departamentosLaboralesUsuario(user) {
+    if (!user) return [];
+    const s = new Set();
+    if (user.departamento) s.add(user.departamento);
+    const raw = user.departamentosEncargado;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        Object.keys(raw).filter((k) => raw[k]).forEach((k) => s.add(k));
+    }
+    return [...s];
+}
+
+function findJefaturaDesempenoPersona(user) {
+    if (!user) return null;
+    return JEFATURAS_DESEMPENO_PERSONAS.find((p) => usuarioCoincideNombreCompleto(user, p.nombreCompleto)) || null;
+}
+
+function getDepartamentosJefaturaDesempeno(user) {
+    const cfg = findJefaturaDesempenoPersona(user);
+    if (cfg?.departamentosGestionados?.length) return cfg.departamentosGestionados;
+    if (user?.rol === 'encargado') return _departamentosLaboralesUsuario(user);
+    return user?.departamento ? [user.departamento] : [];
+}
+
+function getDepartamentosJefaturaEvaluable(user) {
+    const deps = [];
+    Object.keys(JEFATURAS_POR_DEPARTAMENTO).forEach((dep) => {
+        const lista = JEFATURAS_POR_DEPARTAMENTO[dep] || [];
+        if (lista.some((j) => usuarioCoincideJefaturaConfig(user, j))) deps.push(dep);
+    });
+    if (deps.length) return deps;
+    return getDepartamentosJefaturaDesempeno(user);
+}
+
+function usuarioPuedeEvaluarPersonalDesempeno(user) {
+    if (!user || user.activo === false) return false;
+    if (user.rol === 'encargado' || user.rol === 'admin') return true;
+    const cfg = findJefaturaDesempenoPersona(user);
+    return Boolean(cfg?.puedeEvaluarPersonal);
 }
 
 function usuarioExcluidoEvalPersonal(user) {
     if (!user) return true;
-    return EXCLUIDOS_EVAL_PERSONAL.some((nombre) => usuarioCoincideNombreCompleto(user, nombre));
+    const cfg = findJefaturaDesempenoPersona(user);
+    if (cfg?.excluirDePersonalComoEvaluado) return true;
+    return false;
 }
 
 function usuarioCoincideJefaturaConfig(user, configEntry) {
     if (!user || !configEntry) return false;
-    const full = normalizeNombrePersona(user.nombre, user.apellido);
-    const target = String(configEntry.nombreCompleto || '').trim().replace(/\s+/g, ' ').toLowerCase();
-    if (!target) return false;
-    return full === target;
+    return usuarioCoincideNombreCompleto(user, configEntry.nombreCompleto);
+}
+
+function _resolverUsuariosJefaturasConfig(depsEvaluador, users, excludeUserId) {
+    const map = new Map();
+    if (!depsEvaluador?.length) return map;
+    depsEvaluador.forEach((dep) => {
+        (JEFATURAS_POR_DEPARTAMENTO[dep] || []).forEach((entry) => {
+            (users || []).forEach((u) => {
+                if (!u.activo || u.id === excludeUserId) return;
+                if (usuarioCoincideNombreCompleto(u, entry.nombreCompleto)) {
+                    map.set(u.id, u);
+                }
+            });
+        });
+    });
+    return map;
 }
 
 function usuarioEsJefaturaDepartamento(user, codigoDepartamento) {
     if (!user || !codigoDepartamento || user.activo === false) return false;
-    if (user.rol === 'encargado' && user.departamento === codigoDepartamento) return true;
-    const lista = JEFATURAS_EVALUACION_DESEMPENO[codigoDepartamento] || [];
-    return lista.some((j) => usuarioCoincideJefaturaConfig(user, j));
+    const lista = JEFATURAS_POR_DEPARTAMENTO[codigoDepartamento] || [];
+    if (lista.some((j) => usuarioCoincideJefaturaConfig(user, j))) return true;
+    if (user.rol === 'encargado' && _departamentosLaboralesUsuario(user).includes(codigoDepartamento)) {
+        return true;
+    }
+    return false;
 }
 
 function usuarioEsJefaturaEvaluable(user) {
     if (!user || user.activo === false) return false;
     if (user.rol === 'encargado') return true;
+    if (findJefaturaDesempenoPersona(user)) return true;
     return Object.keys(JEFATURAS_EVALUACION_DESEMPENO).some((dep) =>
         usuarioEsJefaturaDepartamento(user, dep));
 }
@@ -615,6 +768,22 @@ function getJefaturasEvaluablesEnDepartamento(codigoDepartamento, users, exclude
     return [...map.values()];
 }
 
+function getJefaturasEvaluablesParaEvaluador(evaluador, users, excludeUserId, depsMap) {
+    const map = new Map();
+    const deps = getDepartamentosEvaluadorJefaturas(evaluador, depsMap);
+    deps.forEach((dep) => {
+        getJefaturasEvaluablesEnDepartamento(dep, users, excludeUserId).forEach((u) => map.set(u.id, u));
+    });
+    _resolverUsuariosJefaturasConfig(deps, users, excludeUserId).forEach((u, id) => map.set(id, u));
+    return [...map.values()];
+}
+
+function evaluadorPuedeEvaluarJefatura(evaluador, evaluado, depsMap) {
+    if (!evaluador || !evaluado) return false;
+    const deps = getDepartamentosEvaluadorJefaturas(evaluador, depsMap);
+    return deps.some((dep) => usuarioEsJefaturaDepartamento(evaluado, dep));
+}
+
 function getAllJefaturasEvaluables(users, excludeUserId) {
     const map = new Map();
     (users || []).forEach((u) => {
@@ -625,9 +794,19 @@ function getAllJefaturasEvaluables(users, excludeUserId) {
 }
 
 function getPuestoJefaturaConfig(user, codigoDepartamento) {
+    const cfg = findJefaturaDesempenoPersona(user);
+    if (cfg) return cfg.puesto || user?.puesto || '';
     const lista = JEFATURAS_EVALUACION_DESEMPENO[codigoDepartamento] || [];
     const hit = lista.find((j) => usuarioCoincideJefaturaConfig(user, j));
     return hit?.puesto || user?.puesto || '';
+}
+
+function getDepartamentosEvaluadorPersonalDesempeno(user) {
+    if (!user) return [];
+    if (user.rol === 'encargado') return _departamentosLaboralesUsuario(user);
+    const cfg = findJefaturaDesempenoPersona(user);
+    if (cfg?.puedeEvaluarPersonal) return getDepartamentosJefaturaDesempeno(user);
+    return [];
 }
 
 /** Puede recibir evaluación de desempeño del personal (empleados + jefaturas, salvo excluidos). */
