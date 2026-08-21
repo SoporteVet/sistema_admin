@@ -46,6 +46,7 @@
 
     "documents": {
       ".read": "auth != null",
+      ".indexOn": ["departamento", "estado", "creadoPor"],
       "$docId": {
         ".read": "auth != null && (
           data.child('estado').val() === 'activo' &&
@@ -95,6 +96,7 @@
 
     "requests": {
       ".read": "auth != null",
+      ".indexOn": ["departamento", "solicitante", "estado"],
       "$reqId": {
         ".read": "auth != null && (
           (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
@@ -147,6 +149,7 @@
 
     "notifications": {
       ".read": "auth != null",
+      ".indexOn": ["destinatario", "leida"],
       "$notifId": {
         ".read": "auth != null && data.child('destinatario').val() === auth.uid",
         ".write": "auth != null && (
@@ -194,7 +197,7 @@
     },
 
     "sanctionFollowups": {
-      ".read": "auth != null && root.child('users').child(auth.uid).exists()",
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
       ".indexOn": ["creadoPor"],
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
@@ -218,15 +221,11 @@
           )
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
-          (!data.exists() && newData.exists() && (
-            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            root.child('users').child(auth.uid).child('rol').val() === 'encargado'
-          )) ||
+          (!data.exists() && newData.exists() && newData.child('creadoPor').val() === auth.uid) ||
           (!newData.exists() && data.exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
             (
               data.child('creadoPor').val() === auth.uid &&
-              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
               (!data.hasChild('flujoEtapa') || data.child('flujoEtapa').val() === 'pendiente_ti')
             )
           )) ||
@@ -234,11 +233,11 @@
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
             (
               data.child('creadoPor').val() === auth.uid &&
-              root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+              (!data.hasChild('flujoEtapa') || data.child('flujoEtapa').val() === 'pendiente_ti')
             )
           ))
         )",
-        ".validate": "!newData.exists() || !data.exists() || (newData.hasChildren(['titulo', 'texto', 'estado', 'flujoEtapa', 'creadoPor', 'creadoPorNombre', 'departamento', 'fechaCreacion', 'fechaActualizacion', 'visiblesPara']) && newData.child('flujoEtapa').val() === 'pendiente_ti')",
+        ".validate": "!newData.exists() || !data.exists() || newData.hasChildren(['titulo', 'texto', 'estado', 'flujoEtapa', 'creadoPor', 'creadoPorNombre', 'departamento', 'fechaCreacion', 'fechaActualizacion', 'visiblesPara'])",
         "titulo": {
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 300"
         },
@@ -368,17 +367,17 @@
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-          (
-            newData.exists() &&
-            newData.val() === true &&
-            root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid &&
-            root.child('users').child(auth.uid).child('rol').val() === 'encargado'
-          ) ||
+            (
+              newData.exists() &&
+              newData.val() === true &&
+              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid
+            ) ||
           (
             !newData.exists() &&
             (
               root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid
             )
           )
         )",
@@ -455,13 +454,7 @@
         "$ticketId": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            (
-              auth.uid === $creatorUid &&
-              (
-                root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-                root.child('users').child(auth.uid).child('rol').val() === 'encargado'
-              )
-            )
+            auth.uid === $creatorUid
           )",
           ".validate": "!newData.exists() || newData.val() === true"
         }
@@ -475,8 +468,11 @@
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
             (
-              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
-              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid
+              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid &&
+              (
+                root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+                root.child('users').child(auth.uid).child('rol').val() === 'encargado'
+              )
             )
           )",
           ".validate": "!newData.exists() || newData.val() === true"
@@ -579,8 +575,8 @@
             data.exists() &&
             data.child('evaluadorId').val() === auth.uid &&
             root.child('users').child(auth.uid).child('rol').val() !== 'admin' &&
-            !newData.hasChild('decisionAdministrativa') &&
-            !newData.hasChild('observacionAdministracion')
+            newData.child('decisionAdministrativa').val() === data.child('decisionAdministrativa').val() &&
+            newData.child('observacionAdministracion').val() === data.child('observacionAdministracion').val()
           )
         )",
         ".validate": "!newData.exists() || (

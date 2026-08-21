@@ -1,7 +1,8 @@
 // ============================================================
 // SANCTIONS-FOLLOWUP.JS — Seguimiento de sanciones o quejas (tickets)
 // Veterinaria San Martín de Porres
-// Flujo: Encargado crea → TI (revisión privada) → RRHH (anotaciones) → Gerencia (cierre)
+// Flujo: Cualquier usuario crea → TI (revisión privada) → RRHH (anotaciones) → Gerencia (cierre)
+// Visibilidad del listado: admin ve todas; encargado y empleado solo las que ellos crearon.
 // ============================================================
 
 class SanctionFollowupManager {
@@ -139,18 +140,22 @@ class SanctionFollowupManager {
         );
     }
 
+    static puedeCrear() {
+        return Boolean(AuthManager.getUser());
+    }
+
     static puedeEditarCuerpo(ticket) {
         const user = AuthManager.getUser();
         if (!user || !ticket) return false;
         if (AuthManager.isAdmin()) return true;
-        if (ticket.creadoPor !== user.id || user.rol !== 'encargado') return false;
+        if (ticket.creadoPor !== user.id) return false;
         if (!ticket.flujoEtapa) {
             return ticket.estado !== this.ESTADO_TERMINADO;
         }
         return ticket.flujoEtapa === this.FLUJO_PENDIENTE_TI;
     }
 
-    /** Compatibilidad: edición modal completa (admin o encargado en etapa TI). */
+    /** Compatibilidad: edición modal completa (admin o autor en etapa TI). */
     static puedeEditar(ticket) {
         return this.puedeEditarCuerpo(ticket);
     }
@@ -184,16 +189,19 @@ class SanctionFollowupManager {
 
     static async create({ titulo, texto, visiblesParaIds }) {
         const user = AuthManager.getUser();
-        if (!user || (!AuthManager.isAdmin() && user.rol !== 'encargado')) {
-            throw new Error('Sin permiso para crear seguimientos');
+        if (!this.puedeCrear()) {
+            throw new Error('Debe iniciar sesión para registrar una queja');
         }
 
         const textoLimpio = String(texto || '').trim();
         if (!textoLimpio) throw new Error('El texto del ticket es obligatorio');
 
+        const puedeCompartir = AuthManager.isAdmin() || user.rol === 'encargado';
         const visiblesPara = {};
-        for (const uid of visiblesParaIds || []) {
-            if (uid && uid !== user.id) visiblesPara[uid] = true;
+        if (puedeCompartir) {
+            for (const uid of visiblesParaIds || []) {
+                if (uid && uid !== user.id) visiblesPara[uid] = true;
+            }
         }
 
         const newRef = dbRef.sanctionFollowups.push();
@@ -215,9 +223,13 @@ class SanctionFollowupManager {
         const updates = {};
         updates[`sanctionFollowups/${ticketId}`] = ticket;
         updates[`sanctionFollowupsByCreator/${user.id}/${ticketId}`] = true;
-        updates[`sanctionFollowupsQueueTi/${ticketId}`] = true;
 
+        // Dos pasos: la cola TI valida creadoPor en sanctionFollowups y en un
+        // update multi-ruta ese registro aún no existe al evaluar las reglas.
         await db.ref().update(updates);
+        await db.ref().update({
+            [`sanctionFollowupsQueueTi/${ticketId}`]: true
+        });
         await this.syncVisibilityIndex(ticketId, visiblesPara, null);
         return { id: ticketId, ...ticket };
     }
@@ -248,8 +260,10 @@ class SanctionFollowupManager {
             }
         }
 
+        const actor = AuthManager.getUser();
+        const puedeCompartir = AuthManager.isAdmin() || actor?.rol === 'encargado';
         let visiblesPara = prev.visiblesPara || {};
-        if (visiblesParaIds !== undefined) {
+        if (visiblesParaIds !== undefined && puedeCompartir) {
             visiblesPara = {};
             for (const uid of visiblesParaIds || []) {
                 if (uid && uid !== prev.creadoPor) visiblesPara[uid] = true;
@@ -277,19 +291,23 @@ class SanctionFollowupManager {
         const now = new Date().toISOString();
         const n = String(notas || '').trim();
 
-        const updates = {};
-        updates[`sanctionFollowupsTiReview/${id}`] = {
+        const tiReview = {
             revisado: true,
             notas: n,
             fecha: now,
             revisadoPor: user.id
         };
-        updates[`sanctionFollowups/${id}/flujoEtapa`] = this.FLUJO_PENDIENTE_RRHH;
-        updates[`sanctionFollowups/${id}/fechaActualizacion`] = now;
-        updates[`sanctionFollowupsQueueTi/${id}`] = null;
-        updates[`sanctionFollowupsQueueRrhh/${id}`] = true;
 
-        await db.ref().update(updates);
+        // Revisión TI primero (regla exige flujoEtapa pendiente_ti); luego avance de etapa y colas.
+        await db.ref().update({
+            [`sanctionFollowupsTiReview/${id}`]: tiReview,
+            [`sanctionFollowups/${id}/fechaActualizacion`]: now
+        });
+        await db.ref().update({
+            [`sanctionFollowups/${id}/flujoEtapa`]: this.FLUJO_PENDIENTE_RRHH,
+            [`sanctionFollowupsQueueTi/${id}`]: null,
+            [`sanctionFollowupsQueueRrhh/${id}`]: true
+        });
         return this.getById(id);
     }
 
@@ -363,7 +381,8 @@ class SanctionFollowupManager {
     static async deleteTicket(id) {
         const prev = await this.getById(id);
         if (!prev) throw new Error('Seguimiento no encontrado');
-        if (!AuthManager.isAdmin() && !(prev.creadoPor === AuthManager.getUser()?.id && AuthManager.isEncargado())) {
+        const actor = AuthManager.getUser();
+        if (!AuthManager.isAdmin() && prev.creadoPor !== actor?.id) {
             throw new Error('Sin permiso para eliminar');
         }
         if (!AuthManager.isAdmin() && this.getFlujoEtapa(prev) !== this.FLUJO_PENDIENTE_TI) {
@@ -374,11 +393,13 @@ class SanctionFollowupManager {
         const updates = {};
         updates[`sanctionFollowups/${id}`] = null;
         updates[`sanctionFollowupsByCreator/${prev.creadoPor}/${id}`] = null;
-        updates[`sanctionFollowupsTiReview/${id}`] = null;
-        updates[`sanctionFollowupsRrhh/${id}`] = null;
         updates[`sanctionFollowupsQueueTi/${id}`] = null;
-        updates[`sanctionFollowupsQueueRrhh/${id}`] = null;
-        updates[`sanctionFollowupsQueueGg/${id}`] = null;
+        if (AuthManager.isAdmin()) {
+            updates[`sanctionFollowupsTiReview/${id}`] = null;
+            updates[`sanctionFollowupsRrhh/${id}`] = null;
+            updates[`sanctionFollowupsQueueRrhh/${id}`] = null;
+            updates[`sanctionFollowupsQueueGg/${id}`] = null;
+        }
         await db.ref().update(updates);
         return true;
     }

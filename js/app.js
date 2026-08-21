@@ -271,7 +271,7 @@ class App {
             'estado-firmas': { title: 'Estado de Firmas', desc: 'Ver quién ha firmado y quién no' },
             'usuarios': { title: 'Usuarios', desc: 'Administración de usuarios' },
             'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' },
-            'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Flujo: Encargado → TI → RRHH → Gerencia' },
+            'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Cualquier usuario registra; admin ve todas y el encargado solo las suyas' },
             'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
             'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' }
         };
@@ -3902,30 +3902,22 @@ ${texto}</pre>
 
         const d = SANCTION_FOLLOWUP_DEPT;
         const isAdmin = AuthManager.isAdmin();
-        const isEnc = user.rol === 'encargado' || isAdmin;
         const deptTi = AuthManager.usuarioEnDepartamento(user, d.TI);
         const deptRh = AuthManager.usuarioEnDepartamento(user, d.RRHH);
         const deptGg = AuthManager.usuarioEnDepartamento(user, d.GERENCIA);
 
-        if (!isEnc && !deptTi && !deptRh && !deptGg) {
-            document.getElementById('contentArea').innerHTML = `
-                <div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>Este módulo es para encargados de área (crear casos) o personal de TI, Recursos Humanos o Gerencia General (colas de revisión).</p>
-                <button type="button" class="btn btn-primary" onclick="App.navigate('dashboard')">Ir al inicio</button></div>`;
-            return;
-        }
-
         const [misTodos, colaTi, colaRrhh, colaGg] = await Promise.all([
-            (isAdmin || user.rol === 'encargado') ? SanctionFollowupManager.listForManager() : Promise.resolve([]),
+            SanctionFollowupManager.listForManager(),
             (isAdmin || deptTi) ? SanctionFollowupManager.listColaTi() : Promise.resolve([]),
             (isAdmin || deptRh) ? SanctionFollowupManager.listColaRrhh() : Promise.resolve([]),
             (isAdmin || deptGg) ? SanctionFollowupManager.listColaGerencia() : Promise.resolve([])
         ]);
 
-        const mis = isAdmin ? misTodos : misTodos;
+        const mis = isAdmin ? [] : misTodos;
         const packs = { mis, cola_ti: colaTi, cola_rrhh: colaRrhh, cola_gg: colaGg, todos: isAdmin ? misTodos : [] };
 
         const allowedTabs = [];
-        if (user.rol === 'encargado') allowedTabs.push({ key: 'mis', label: 'Mis envíos', list: mis });
+        if (!isAdmin) allowedTabs.push({ key: 'mis', label: 'Mis envíos', list: mis });
         if (isAdmin || deptTi) allowedTabs.push({ key: 'cola_ti', label: 'Cola TI', list: colaTi });
         if (isAdmin || deptRh) allowedTabs.push({ key: 'cola_rrhh', label: 'Cola RRHH', list: colaRrhh });
         if (isAdmin || deptGg) allowedTabs.push({ key: 'cola_gg', label: 'Cola Gerencia', list: colaGg });
@@ -3949,9 +3941,7 @@ ${texto}</pre>
         }).join('');
 
         const content = document.getElementById('contentArea');
-        const btnNuevo = (isAdmin || user.rol === 'encargado')
-            ? `<button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionCreateModal()"><i class="fas fa-plus"></i> Nueva queja</button>`
-            : '';
+        const btnNuevo = `<button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionCreateModal()"><i class="fas fa-plus"></i> Nueva queja</button>`;
 
         content.innerHTML = `
             <div class="card">
@@ -3961,7 +3951,8 @@ ${texto}</pre>
                 </div>
                 <div class="card-body">
                     <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:12px;">
-                        Flujo: <strong>Encargado</strong> registra → <strong>TI</strong> revisa (apartado solo TI) → <strong>RRHH</strong> anota → <strong>Gerencia</strong> cierra y aprueba.
+                        Cualquier usuario puede registrar una queja. El administrador ve todas; el encargado de área solo las suyas.
+                        Flujo: registro → <strong>TI</strong> revisa (apartado solo TI) → <strong>RRHH</strong> anota → <strong>Gerencia</strong> cierra y aprueba.
                     </p>
                     <div class="tabs" id="sanctionMainTabs" style="flex-wrap:wrap;margin-bottom:10px;">${mainTabsHtml}</div>
                     <div class="tabs" id="sanctionMgrTabs" style="flex-wrap:wrap;margin-bottom:16px;">
@@ -4025,17 +4016,30 @@ ${texto}</pre>
     }
 
     static async showSanctionCreateModal() {
-        const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== AuthManager.getUser().id);
-        users.sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
-        const checks = users.map(u => `
-            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;">
-                <input type="checkbox" name="sanctionVisible" value="${App.escapeHtml(u.id)}">
-                <span style="font-size:0.88rem;"><strong>${App.escapeHtml(u.nombre)} ${App.escapeHtml(u.apellido)}</strong>
-                <span style="color:var(--text-secondary);"> — ${App.escapeHtml(u.email || '')}</span></span>
-            </label>
-        `).join('');
+        const user = AuthManager.getUser();
+        const puedeCompartir = AuthManager.isAdmin() || user?.rol === 'encargado';
+        let visBlock = '';
+        if (puedeCompartir) {
+            const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== user.id);
+            users.sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
+            const checks = users.map(u => `
+                <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;">
+                    <input type="checkbox" name="sanctionVisible" value="${App.escapeHtml(u.id)}">
+                    <span style="font-size:0.88rem;"><strong>${App.escapeHtml(u.nombre)} ${App.escapeHtml(u.apellido)}</strong>
+                    <span style="color:var(--text-secondary);"> — ${App.escapeHtml(u.email || '')}</span></span>
+                </label>
+            `).join('');
+            visBlock = `
+                <div class="form-group">
+                    <label>Usuarios que pueden ver el seguimiento (no ven la revisión interna de TI)</label>
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Podrá cambiar esta lista después editando el ticket.</p>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
+                        ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
+                    </div>
+                </div>`;
+        }
 
-        this.showModal('Nuevo seguimiento (sanción o queja)', `
+        this.showModal('Nueva queja', `
             <form id="sanctionCreateForm" onsubmit="App.submitSanctionCreate(event)">
                 <div class="form-group">
                     <label>Título</label>
@@ -4045,16 +4049,10 @@ ${texto}</pre>
                     <label>Texto del caso <span class="required">*</span></label>
                     <textarea class="form-control" id="sanctionCreateTexto" rows="8" required placeholder="Descripción del caso..."></textarea>
                 </div>
-                <div class="form-group">
-                    <label>Usuarios que pueden ver el seguimiento (no ven la revisión interna de TI)</label>
-                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-bottom:8px;">Podrá cambiar esta lista después editando el ticket.</p>
-                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
-                        ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
-                    </div>
-                </div>
+                ${visBlock}
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Crear ticket</button>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Enviar queja</button>
                 </div>
             </form>
         `, true);
@@ -4084,16 +4082,28 @@ ${texto}</pre>
             Toast.error('Error', 'No puede editar este caso en esta etapa');
             return;
         }
-        const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== t.creadoPor);
-        users.sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
-        const vis = t.visiblesPara || {};
-        const checks = users.map(u => `
-            <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;">
-                <input type="checkbox" name="sanctionVisible" value="${App.escapeHtml(u.id)}" ${vis[u.id] ? 'checked' : ''}>
-                <span style="font-size:0.88rem;"><strong>${App.escapeHtml(u.nombre)} ${App.escapeHtml(u.apellido)}</strong>
-                <span style="color:var(--text-secondary);"> — ${App.escapeHtml(u.email || '')}</span></span>
-            </label>
-        `).join('');
+        const user = AuthManager.getUser();
+        const puedeCompartir = AuthManager.isAdmin() || user?.rol === 'encargado';
+        let visBlock = '';
+        if (puedeCompartir) {
+            const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== t.creadoPor);
+            users.sort((a, b) => `${a.nombre} ${a.apellido}`.localeCompare(`${b.nombre} ${b.apellido}`, 'es'));
+            const vis = t.visiblesPara || {};
+            const checks = users.map(u => `
+                <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;cursor:pointer;">
+                    <input type="checkbox" name="sanctionVisible" value="${App.escapeHtml(u.id)}" ${vis[u.id] ? 'checked' : ''}>
+                    <span style="font-size:0.88rem;"><strong>${App.escapeHtml(u.nombre)} ${App.escapeHtml(u.apellido)}</strong>
+                    <span style="color:var(--text-secondary);"> — ${App.escapeHtml(u.email || '')}</span></span>
+                </label>
+            `).join('');
+            visBlock = `
+                <div class="form-group">
+                    <label>Usuarios que pueden ver este seguimiento</label>
+                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
+                        ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
+                    </div>
+                </div>`;
+        }
 
         const eTitulo = App.escapeHtml(t.titulo || '');
         const eTexto = App.escapeHtml(t.texto || '');
@@ -4120,12 +4130,7 @@ ${texto}</pre>
                     <textarea class="form-control" id="sanctionEditTexto" rows="8" required>${eTexto}</textarea>
                 </div>
                 ${estadoBlock}
-                <div class="form-group">
-                    <label>Usuarios que pueden ver este seguimiento</label>
-                    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:10px;">
-                        ${checks || '<p style="font-size:0.85rem;color:var(--text-secondary);">No hay otros usuarios activos.</p>'}
-                    </div>
-                </div>
+                ${visBlock}
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
                     <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Guardar</button>
@@ -4144,8 +4149,10 @@ ${texto}</pre>
         const estadoEl = document.getElementById('sanctionEditEstado');
         const estado = estadoEl ? estadoEl.value : undefined;
         const boxes = form.querySelectorAll('input[name="sanctionVisible"]:checked');
-        const visiblesParaIds = Array.from(boxes).map((b) => b.value);
-        const patch = { titulo, texto, visiblesParaIds };
+        const patch = { titulo, texto };
+        if (AuthManager.isAdmin() || AuthManager.getUser()?.rol === 'encargado') {
+            patch.visiblesParaIds = Array.from(boxes).map((b) => b.value);
+        }
         if (AuthManager.isAdmin() && estado !== undefined) patch.estado = estado;
         try {
             await SanctionFollowupManager.updateTicket(ticketId, patch);
