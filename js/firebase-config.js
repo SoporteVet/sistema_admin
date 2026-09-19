@@ -42,6 +42,7 @@ const dbRef = {
     sanctionFollowupsQueueRrhh: db.ref('sanctionFollowupsQueueRrhh'),
     sanctionFollowupsQueueGg: db.ref('sanctionFollowupsQueueGg'),
     sanctionFollowupsByDepartment: db.ref('sanctionFollowupsByDepartment'),
+    sanctionFollowupsSubmitTokens: db.ref('sanctionFollowupsSubmitTokens'),
     sanctionFollowupsAdjuntoFiles: db.ref('sanctionFollowupsAdjuntoFiles'),
     politicasInternas: db.ref('politicasInternas'),
     politicasInternasFiles: db.ref('politicasInternasFiles'),

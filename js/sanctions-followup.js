@@ -12,7 +12,47 @@ class SanctionFollowupManager {
     /** Adjuntos en RTDB (Base64), mismo enfoque que políticas internas — sin Storage de pago. */
     static MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
     static MAX_ADJUNTOS_POR_TICKET = 10;
-    static _createInFlight = false;
+    static _createChain = Promise.resolve();
+
+    static _newIdempotencyKey() {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+            return crypto.randomUUID();
+        }
+        return `idem-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    }
+
+    /**
+     * Un solo envío por token (modal). Re-clics reutilizan el mismo ticket si ya se creó.
+     */
+    static async _resolveSubmitToken(userId, idempotencyKey) {
+        if (!userId || !idempotencyKey) {
+            return { mode: 'create', tokenRef: null };
+        }
+        const tokenRef = dbRef.sanctionFollowupsSubmitTokens.child(userId).child(idempotencyKey);
+        const tx = await tokenRef.transaction((cur) => {
+            if (cur && cur.ticketId) return cur;
+            if (cur && cur.status === 'pending') return;
+            return { status: 'pending', startedAt: Date.now() };
+        });
+        const val = tx.snapshot.val();
+        if (val && val.ticketId) {
+            return { mode: 'reuse', ticketId: val.ticketId, tokenRef };
+        }
+        if (!tx.committed) {
+            throw new Error('Su queja ya se está enviando. Espere en esta pantalla; no pulse otra vez el botón.');
+        }
+        return { mode: 'create', tokenRef };
+    }
+
+    static async _markTokenTicket(tokenRef, ticketId) {
+        if (!tokenRef || !ticketId) return;
+        await tokenRef.update({ ticketId, status: 'pending' });
+    }
+
+    static async _markTokenDone(tokenRef, ticketId) {
+        if (!tokenRef || !ticketId) return;
+        await tokenRef.update({ ticketId, status: 'done', finishedAt: Date.now() });
+    }
 
     static FLUJO_PENDIENTE_TI = 'pendiente_ti';
     static FLUJO_PENDIENTE_RRHH = 'pendiente_rrhh';
@@ -168,6 +208,33 @@ class SanctionFollowupManager {
         return this.puedeEditarCuerpo(ticket);
     }
 
+    /** Subir evidencias: empleado (etapa TI), personal TI (pendiente_ti), RRHH (pendiente_rrhh) o admin. */
+    static puedeAdjuntarArchivos(ticket) {
+        const user = AuthManager.getUser();
+        if (!user || !ticket) return false;
+        if (ticket.flujoEtapa === this.FLUJO_CERRADO && !AuthManager.isAdmin()) return false;
+        if (AuthManager.isAdmin()) return true;
+        if (this.puedeEditarCuerpo(ticket)) return true;
+        if (this.puedeMarcarRevisionTi(ticket)) return true;
+        if (this.puedeActuarRrhh(ticket)) return true;
+        return false;
+    }
+
+    static puedeEliminarAdjunto(ticket, meta) {
+        const user = AuthManager.getUser();
+        if (!user || !ticket || !meta) return false;
+        if (AuthManager.isAdmin()) return true;
+        if (meta.subidoPor !== user.id) return false;
+        return this.puedeAdjuntarArchivos(ticket) || this.puedeEditarCuerpo(ticket);
+    }
+
+    static _origenAdjunto(ticket) {
+        if (AuthManager.isAdmin()) return 'admin';
+        if (this.puedeMarcarRevisionTi(ticket)) return 'ti';
+        if (this.puedeActuarRrhh(ticket)) return 'rrhh';
+        return 'empleado';
+    }
+
     static puedeMarcarRevisionTi(ticket) {
         if (!ticket || !this.ticketTieneFlujoEtapa(ticket)) return false;
         if (ticket.flujoEtapa !== this.FLUJO_PENDIENTE_TI) return false;
@@ -221,7 +288,7 @@ class SanctionFollowupManager {
         return m === 'application/pdf';
     }
 
-    static async _subirAdjunto(ticketId, file) {
+    static async _subirAdjunto(ticketId, file, ticket) {
         const mime = this._inferMime(file);
         if (!this._mimeAdjuntoPermitido(mime)) {
             throw new Error('Solo se permiten imágenes, video, audio o PDF');
@@ -237,7 +304,9 @@ class SanctionFollowupManager {
             mimeType: mime,
             tamanoBytes: file.size,
             fecha: new Date().toISOString(),
-            subidoPor: user.id
+            subidoPor: user.id,
+            subidoPorNombre: `${user.nombre} ${user.apellido}`.trim(),
+            origen: this._origenAdjunto(ticket)
         };
         // Metadatos y binario bajo el mismo ticket (hereda lectura del caso).
         await db.ref().update({
@@ -252,7 +321,7 @@ class SanctionFollowupManager {
     static async addAdjuntos(ticketId, files) {
         const prev = await this.getById(ticketId);
         if (!prev) throw new Error('Seguimiento no encontrado');
-        if (!this.puedeEditarCuerpo(prev)) throw new Error('Sin permiso para adjuntar archivos en esta etapa');
+        if (!this.puedeAdjuntarArchivos(prev)) throw new Error('Sin permiso para adjuntar archivos en esta etapa');
         const list = Array.from(files || []).filter(Boolean);
         if (list.length === 0) return [];
         const actuales = Object.keys(prev.adjuntos || {}).length;
@@ -261,7 +330,7 @@ class SanctionFollowupManager {
         }
         const ids = [];
         for (const file of list) {
-            ids.push(await this._subirAdjunto(ticketId, file));
+            ids.push(await this._subirAdjunto(ticketId, file, prev));
         }
         await dbRef.sanctionFollowups.child(ticketId).update({ fechaActualizacion: new Date().toISOString() });
         return ids;
@@ -285,7 +354,8 @@ class SanctionFollowupManager {
     static async deleteAdjunto(ticketId, adjId) {
         const prev = await this.getById(ticketId);
         if (!prev) throw new Error('Seguimiento no encontrado');
-        if (!this.puedeEditarCuerpo(prev)) throw new Error('Sin permiso para eliminar adjuntos');
+        const meta = (prev.adjuntos || {})[adjId];
+        if (!this.puedeEliminarAdjunto(prev, meta)) throw new Error('Sin permiso para eliminar adjuntos');
         const updates = {
             [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: null,
             [`sanctionFollowups/${ticketId}/adjuntoFiles/${adjId}`]: null,
@@ -295,22 +365,25 @@ class SanctionFollowupManager {
         await db.ref().update(updates);
     }
 
-    static async create({ titulo, texto, visiblesParaIds, archivos }) {
-        if (this._createInFlight) {
-            throw new Error('Ya se está enviando una queja. Espere un momento.');
-        }
-        this._createInFlight = true;
-        try {
-            return await this._createInternal({ titulo, texto, visiblesParaIds, archivos });
-        } finally {
-            this._createInFlight = false;
-        }
+    static async create({ titulo, texto, visiblesParaIds, archivos, idempotencyKey }) {
+        const run = async () => this._createInternal({ titulo, texto, visiblesParaIds, archivos, idempotencyKey });
+        const chained = this._createChain.then(run, run);
+        this._createChain = chained.catch(() => {});
+        return chained;
     }
 
-    static async _createInternal({ titulo, texto, visiblesParaIds, archivos }) {
+    static async _createInternal({ titulo, texto, visiblesParaIds, archivos, idempotencyKey }) {
         const user = AuthManager.getUser();
         if (!this.puedeCrear()) {
             throw new Error('Debe iniciar sesión para registrar una queja');
+        }
+
+        const token = await this._resolveSubmitToken(user.id, idempotencyKey);
+        if (token.mode === 'reuse') {
+            const existing = await this.getById(token.ticketId);
+            if (existing) {
+                return { id: token.ticketId, ...existing, _reused: true };
+            }
         }
 
         const textoLimpio = String(texto || '').trim();
@@ -344,13 +417,10 @@ class SanctionFollowupManager {
         updates[`sanctionFollowups/${ticketId}`] = ticket;
         updates[`sanctionFollowupsByCreator/${user.id}/${ticketId}`] = true;
 
-        // Dos pasos: la cola TI valida creadoPor en sanctionFollowups y en un
-        // update multi-ruta ese registro aún no existe al evaluar las reglas.
         await db.ref().update(updates);
+        await this._markTokenTicket(token.tokenRef, ticketId);
         await db.ref().update({
-            [`sanctionFollowupsQueueTi/${ticketId}`]: true
-        });
-        await db.ref().update({
+            [`sanctionFollowupsQueueTi/${ticketId}`]: true,
             [`sanctionFollowupsByDepartment/${user.departamento}/${ticketId}`]: true
         });
         await this.syncVisibilityIndex(ticketId, visiblesPara, null);
@@ -360,12 +430,14 @@ class SanctionFollowupManager {
                 await this.addAdjuntos(ticketId, fileList);
             } catch (err) {
                 console.error('Adjuntos queja:', err);
+                await this._markTokenDone(token.tokenRef, ticketId);
                 throw new Error(
                     (err && err.message) ||
-                        'La queja se guardó pero no se pudieron subir los archivos. Vuelva a abrirla y adjúntelos desde Editar.'
+                        'La queja se guardó pero no se pudieron subir los archivos. Ábrala y adjúntelos desde Editar.'
                 );
             }
         }
+        await this._markTokenDone(token.tokenRef, ticketId);
         return { id: ticketId, ...ticket };
     }
 

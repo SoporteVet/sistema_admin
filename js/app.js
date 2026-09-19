@@ -4019,9 +4019,15 @@ ${texto}</pre>
         if (container) container.innerHTML = this.renderSanctionManagerCards(list);
     }
 
+    static _sanctionSubmitBusy = false;
+    static _sanctionCreateIdempotencyKey = '';
+
     static async showSanctionCreateModal() {
+        App._sanctionSubmitBusy = false;
+        App._sanctionCreateIdempotencyKey = SanctionFollowupManager._newIdempotencyKey();
         const user = AuthManager.getUser();
         const puedeCompartir = AuthManager.isAdmin() || user?.rol === 'encargado';
+        const idemKey = App.escapeHtml(App._sanctionCreateIdempotencyKey);
         let visBlock = '';
         if (puedeCompartir) {
             const users = (await AuthManager.getAllUsers()).filter(u => u.activo && u.id !== user.id);
@@ -4044,7 +4050,15 @@ ${texto}</pre>
         }
 
         this.showModal('Nueva queja', `
-            <form id="sanctionCreateForm" onsubmit="App.submitSanctionCreate(event)">
+            <form id="sanctionCreateForm" style="position:relative;" onsubmit="return App.submitSanctionCreate(event)">
+                <input type="hidden" id="sanctionCreateIdempotency" value="${idemKey}">
+                <div id="sanctionCreateOverlay" style="display:none;position:absolute;inset:0;background:rgba(255,255,255,0.88);z-index:20;align-items:center;justify-content:center;border-radius:var(--radius-md);">
+                    <div style="text-align:center;padding:20px;">
+                        <i class="fas fa-spinner fa-spin" style="font-size:2rem;color:var(--primary);"></i>
+                        <p style="margin-top:12px;font-weight:600;">Enviando queja…</p>
+                        <p style="font-size:0.85rem;color:var(--text-secondary);margin-top:6px;">No cierre ni pulse de nuevo.</p>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label>Título</label>
                     <input class="form-control" id="sanctionCreateTitulo" placeholder="Referencia breve" maxlength="280">
@@ -4063,48 +4077,82 @@ ${texto}</pre>
                 </div>
                 ${visBlock}
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
-                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
-                    <button type="submit" class="btn btn-primary"><i class="fas fa-save"></i> Enviar queja</button>
+                    <button type="button" class="btn btn-outline" id="sanctionCreateCancelBtn" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="sanctionCreateSubmitBtn"><i class="fas fa-save"></i> Enviar queja</button>
                 </div>
             </form>
         `, true);
     }
 
+    static _setSanctionCreateUiBusy(busy) {
+        const form = document.getElementById('sanctionCreateForm');
+        const overlay = document.getElementById('sanctionCreateOverlay');
+        const submitBtn = document.getElementById('sanctionCreateSubmitBtn');
+        const cancelBtn = document.getElementById('sanctionCreateCancelBtn');
+        if (overlay) overlay.style.display = busy ? 'flex' : 'none';
+        if (submitBtn) submitBtn.disabled = busy;
+        if (cancelBtn) cancelBtn.disabled = busy;
+        if (form) {
+            form.querySelectorAll('input, textarea, select, button').forEach((el) => {
+                if (el.id === 'sanctionCreateSubmitBtn' || el.id === 'sanctionCreateCancelBtn') return;
+                el.disabled = busy;
+            });
+        }
+    }
+
     static async submitSanctionCreate(e) {
         e.preventDefault();
+        e.stopPropagation();
+        if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+        if (App._sanctionSubmitBusy) return false;
+
         const form = document.getElementById('sanctionCreateForm');
-        const submitBtn = form?.querySelector('button[type="submit"]');
-        if (form?.dataset.submitting === '1') return;
+        if (form?.dataset.submitting === '1') return false;
+
+        App._sanctionSubmitBusy = true;
         if (form) form.dataset.submitting = '1';
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.dataset.label = submitBtn.innerHTML;
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando…';
-        }
+        App._setSanctionCreateUiBusy(true);
+
         const titulo = document.getElementById('sanctionCreateTitulo')?.value || '';
         const texto = document.getElementById('sanctionCreateTexto')?.value || '';
         const archivos = document.getElementById('sanctionCreateArchivos')?.files;
+        const idempotencyKey =
+            document.getElementById('sanctionCreateIdempotency')?.value ||
+            App._sanctionCreateIdempotencyKey;
         const boxes = form ? form.querySelectorAll('input[name="sanctionVisible"]:checked') : [];
         const visiblesParaIds = Array.from(boxes).map(b => b.value);
         try {
-            await SanctionFollowupManager.create({ titulo, texto, visiblesParaIds, archivos });
-            Toast.success('Creado', 'El caso fue enviado. Pasará primero a revisión de TI.');
+            const result = await SanctionFollowupManager.create({
+                titulo,
+                texto,
+                visiblesParaIds,
+                archivos,
+                idempotencyKey
+            });
+            const msg = result && result._reused
+                ? 'El envío ya estaba en curso; se abrió el caso existente.'
+                : 'El caso fue enviado. Pasará primero a revisión de TI.';
+            Toast.success('Creado', msg);
             App.closeModal();
+            App._sanctionSubmitBusy = false;
             await App.refreshSanctionSharedNavItem();
             App.navigate('seguimiento-sanciones');
         } catch (err) {
             Toast.error('Error', err.message || String(err));
-            if (form) delete form.dataset.submitting;
-            if (submitBtn) {
-                submitBtn.disabled = false;
-                if (submitBtn.dataset.label) submitBtn.innerHTML = submitBtn.dataset.label;
+            const msg = String(err?.message || '');
+            const saved = msg.includes('se guardó') || msg.includes('adjúntelos');
+            if (!saved) {
+                if (form) delete form.dataset.submitting;
+                App._sanctionSubmitBusy = false;
+                App._setSanctionCreateUiBusy(false);
             }
         }
+        return false;
     }
 
     static async showSanctionEditModal(ticketId) {
         const t = await SanctionFollowupManager.getById(ticketId);
-        if (!t || !SanctionFollowupManager.puedeEditarCuerpo(t)) {
+        if (!t || (!SanctionFollowupManager.puedeEditarCuerpo(t) && !SanctionFollowupManager.puedeAdjuntarArchivos(t))) {
             Toast.error('Error', 'No puede editar este caso en esta etapa');
             return;
         }
@@ -4131,7 +4179,8 @@ ${texto}</pre>
                 </div>`;
         }
 
-        const adjBlock = `
+        const adjBlock = SanctionFollowupManager.puedeAdjuntarArchivos(t)
+            ? `
                 <div class="form-group">
                     <label>Agregar evidencias</label>
                     <input type="file" class="form-control" id="sanctionEditArchivos" multiple
@@ -4139,7 +4188,8 @@ ${texto}</pre>
                     <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.submitSanctionAdjuntos('${App.escapeJsString(ticketId)}')">
                         <i class="fas fa-paperclip"></i> Subir seleccionados
                     </button>
-                </div>`;
+                </div>`
+            : '';
 
         const eTitulo = App.escapeHtml(t.titulo || '');
         const eTexto = App.escapeHtml(t.texto || '');
@@ -4274,34 +4324,55 @@ ${texto}</pre>
         return 'fa-file-pdf';
     }
 
-    static renderSanctionAdjuntosList(ticket, puedeEditar) {
+    static _etiquetaOrigenAdjunto(origen) {
+        const m = { empleado: 'Empleado', ti: 'TI', rrhh: 'RRHH', admin: 'Administración' };
+        return m[origen] || origen || '';
+    }
+
+    static renderSanctionAdjuntosBlock(ticket) {
+        const puedeSubir = SanctionFollowupManager.puedeAdjuntarArchivos(ticket);
         const adj = ticket.adjuntos || {};
         const ids = Object.keys(adj);
-        if (!ids.length) {
-            return `<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:12px;">Sin archivos adjuntos.</p>`;
-        }
         const tid = App.escapeJsString(ticket.id);
+        const lista = ids.length
+            ? ids.map((aid) => {
+                const meta = adj[aid];
+                const icon = App._sanctionAdjuntoIcon(meta.mimeType);
+                const name = App.escapeHtml(meta.nombreArchivo || aid);
+                const size = PoliticaInternaManager.formatBytes(meta.tamanoBytes ?? meta.tamañoBytes);
+                const aidJs = App.escapeJsString(aid);
+                const quien = meta.subidoPorNombre
+                    ? App.escapeHtml(meta.subidoPorNombre)
+                    : App.escapeHtml(meta.subidoPor || '');
+                const origen = App._etiquetaOrigenAdjunto(meta.origen || meta.origenEtapa);
+                const del = SanctionFollowupManager.puedeEliminarAdjunto(ticket, meta)
+                    ? `<button type="button" class="btn btn-sm btn-danger" onclick="App.eliminarSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-trash"></i></button>`
+                    : '';
+                return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--border-light);border-radius:var(--radius-sm);">
+                    <i class="fas ${icon}" style="color:var(--primary);"></i>
+                    <span style="flex:1;font-size:0.88rem;">${name} <span style="color:var(--text-secondary);">(${size})</span>
+                    ${quien ? `<br><span style="font-size:0.78rem;color:var(--text-secondary);">Subido por ${quien}${origen ? ` · ${App.escapeHtml(origen)}` : ''}</span>` : ''}</span>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="App.abrirSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-eye"></i> Ver</button>
+                    ${del}
+                </div>`;
+            }).join('')
+            : `<p style="font-size:0.85rem;color:var(--text-secondary);">Sin archivos adjuntos.</p>`;
+
+        const subir = puedeSubir ? `
+                <div class="form-group" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-light);">
+                    <label>Agregar evidencias (imagen, video, audio o PDF)</label>
+                    <input type="file" class="form-control" id="sanctionDetalleArchivos" multiple
+                        accept="image/*,video/*,audio/*,application/pdf,.pdf">
+                    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.submitSanctionDetalleAdjuntos('${tid}')">
+                        <i class="fas fa-paperclip"></i> Subir archivos
+                    </button>
+                </div>` : '';
+
         return `
             <div style="margin-top:16px;">
-                <h4 style="font-size:0.95rem;margin:0 0 10px;"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary);"></i>Evidencias adjuntas</h4>
-                <div style="display:flex;flex-direction:column;gap:8px;">
-                    ${ids.map((aid) => {
-                        const meta = adj[aid];
-                        const icon = App._sanctionAdjuntoIcon(meta.mimeType);
-                        const name = App.escapeHtml(meta.nombreArchivo || aid);
-                        const size = PoliticaInternaManager.formatBytes(meta.tamanoBytes ?? meta.tamañoBytes);
-                        const aidJs = App.escapeJsString(aid);
-                        const del = puedeEditar
-                            ? `<button type="button" class="btn btn-sm btn-danger" onclick="App.eliminarSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-trash"></i></button>`
-                            : '';
-                        return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--border-light);border-radius:var(--radius-sm);">
-                            <i class="fas ${icon}" style="color:var(--primary);"></i>
-                            <span style="flex:1;font-size:0.88rem;">${name} <span style="color:var(--text-secondary);">(${size})</span></span>
-                            <button type="button" class="btn btn-sm btn-outline" onclick="App.abrirSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-eye"></i> Ver</button>
-                            ${del}
-                        </div>`;
-                    }).join('')}
-                </div>
+                <h4 style="font-size:0.95rem;margin:0 0 10px;"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary);"></i>Evidencias del caso</h4>
+                <div style="display:flex;flex-direction:column;gap:8px;">${lista}</div>
+                ${subir}
             </div>`;
     }
 
@@ -4338,6 +4409,25 @@ ${texto}</pre>
             App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
         } catch (e) {
             Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async submitSanctionDetalleAdjuntos(ticketId) {
+        const input = document.getElementById('sanctionDetalleArchivos');
+        const files = input?.files;
+        if (!files || !files.length) {
+            Toast.info('Archivos', 'Seleccione uno o más archivos.');
+            return;
+        }
+        const btn = input?.parentElement?.querySelector('button');
+        if (btn) btn.disabled = true;
+        try {
+            await SanctionFollowupManager.addAdjuntos(ticketId, files);
+            Toast.success('Listo', 'Evidencias subidas al caso.');
+            App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+            if (btn) btn.disabled = false;
         }
     }
 
@@ -4503,7 +4593,7 @@ ${texto}</pre>
                     </p>
                     <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;"><strong>Pueden ver el relato del caso:</strong> ${App.escapeHtml(visLine)}</p>
                     <div style="padding:16px;background:var(--bg-main);border-radius:var(--radius-md);border:1px solid var(--border-light);white-space:pre-wrap;font-size:0.92rem;line-height:1.5;">${App.escapeHtml(ticket.texto || '')}</div>
-                    ${App.renderSanctionAdjuntosList(ticket, puedeEditarCuerpo)}
+                    ${App.renderSanctionAdjuntosBlock(ticket)}
                     ${accionesCreador}
                     ${bloqueTi}
                     ${bloqueRrhh}
