@@ -194,17 +194,35 @@ class SanctionFollowupManager {
         return AuthManager.usuarioEnDepartamento(user, SANCTION_FOLLOWUP_DEPT.GERENCIA);
     }
 
-    static _mimeAdjuntoPermitido(mime, fileName) {
+    static _inferMime(file) {
+        const declared = String(file?.type || '').trim();
+        if (declared) return declared;
+        const name = String(file?.name || '').toLowerCase();
+        if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+        if (name.endsWith('.png')) return 'image/png';
+        if (name.endsWith('.gif')) return 'image/gif';
+        if (name.endsWith('.webp')) return 'image/webp';
+        if (name.endsWith('.heic')) return 'image/heic';
+        if (name.endsWith('.mp4') || name.endsWith('.m4v')) return 'video/mp4';
+        if (name.endsWith('.webm')) return 'video/webm';
+        if (name.endsWith('.mov')) return 'video/quicktime';
+        if (name.endsWith('.mp3')) return 'audio/mpeg';
+        if (name.endsWith('.wav')) return 'audio/wav';
+        if (name.endsWith('.ogg')) return 'audio/ogg';
+        if (name.endsWith('.m4a')) return 'audio/mp4';
+        if (name.endsWith('.pdf')) return 'application/pdf';
+        return '';
+    }
+
+    static _mimeAdjuntoPermitido(mime) {
         const m = String(mime || '').toLowerCase();
-        const name = String(fileName || '').toLowerCase();
         if (m.startsWith('image/') || m.startsWith('video/') || m.startsWith('audio/')) return true;
-        if (m === 'application/pdf' || name.endsWith('.pdf')) return true;
-        return false;
+        return m === 'application/pdf';
     }
 
     static async _subirAdjunto(ticketId, file) {
-        const mime = file.type || 'application/octet-stream';
-        if (!this._mimeAdjuntoPermitido(mime, file.name)) {
+        const mime = this._inferMime(file);
+        if (!this._mimeAdjuntoPermitido(mime)) {
             throw new Error('Solo se permiten imágenes, video, audio o PDF');
         }
         if (file.size > this.MAX_ADJUNTO_BYTES) {
@@ -216,13 +234,16 @@ class SanctionFollowupManager {
         const meta = {
             nombreArchivo: file.name || 'adjunto',
             mimeType: mime,
-            tamañoBytes: file.size,
+            tamanoBytes: file.size,
             fecha: new Date().toISOString(),
             subidoPor: user.id
         };
+        // Metadatos y binario bajo el mismo ticket (hereda lectura del caso).
         await db.ref().update({
-            [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: meta,
-            [`sanctionFollowupsAdjuntoFiles/${ticketId}/${adjId}`]: { dataBase64, mimeType: mime }
+            [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: meta
+        });
+        await db.ref().update({
+            [`sanctionFollowups/${ticketId}/adjuntoFiles/${adjId}`]: { dataBase64, mimeType: mime }
         });
         return adjId;
     }
@@ -250,7 +271,10 @@ class SanctionFollowupManager {
         if (!ticket || !this.puedeVer(ticket)) throw new Error('Sin permiso');
         const meta = (ticket.adjuntos || {})[adjId];
         if (!meta) throw new Error('Adjunto no encontrado');
-        const snap = await dbRef.sanctionFollowupsAdjuntoFiles.child(ticketId).child(adjId).once('value');
+        let snap = await dbRef.sanctionFollowups.child(ticketId).child('adjuntoFiles').child(adjId).once('value');
+        if (!snap.exists() && dbRef.sanctionFollowupsAdjuntoFiles) {
+            snap = await dbRef.sanctionFollowupsAdjuntoFiles.child(ticketId).child(adjId).once('value');
+        }
         if (!snap.exists()) throw new Error('Contenido del adjunto no encontrado');
         const { dataBase64, mimeType } = snap.val();
         const blob = PoliticaInternaManager.base64ToBlob(dataBase64, mimeType || meta.mimeType);
@@ -261,11 +285,13 @@ class SanctionFollowupManager {
         const prev = await this.getById(ticketId);
         if (!prev) throw new Error('Seguimiento no encontrado');
         if (!this.puedeEditarCuerpo(prev)) throw new Error('Sin permiso para eliminar adjuntos');
-        await db.ref().update({
+        const updates = {
             [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: null,
-            [`sanctionFollowupsAdjuntoFiles/${ticketId}/${adjId}`]: null,
+            [`sanctionFollowups/${ticketId}/adjuntoFiles/${adjId}`]: null,
             [`sanctionFollowups/${ticketId}/fechaActualizacion`]: new Date().toISOString()
-        });
+        };
+        updates[`sanctionFollowupsAdjuntoFiles/${ticketId}/${adjId}`] = null;
+        await db.ref().update(updates);
     }
 
     static async create({ titulo, texto, visiblesParaIds, archivos }) {
@@ -317,7 +343,15 @@ class SanctionFollowupManager {
         await this.syncVisibilityIndex(ticketId, visiblesPara, null);
         const fileList = Array.from(archivos || []).filter(Boolean);
         if (fileList.length) {
-            await this.addAdjuntos(ticketId, fileList);
+            try {
+                await this.addAdjuntos(ticketId, fileList);
+            } catch (err) {
+                console.error('Adjuntos queja:', err);
+                throw new Error(
+                    (err && err.message) ||
+                        'La queja se guardó pero no se pudieron subir los archivos. Vuelva a abrirla y adjúntelos desde Editar.'
+                );
+            }
         }
         return { id: ticketId, ...ticket };
     }
@@ -487,6 +521,7 @@ class SanctionFollowupManager {
         }
         const adjIds = Object.keys(prev.adjuntos || {});
         for (const adjId of adjIds) {
+            updates[`sanctionFollowups/${id}/adjuntoFiles/${adjId}`] = null;
             updates[`sanctionFollowupsAdjuntoFiles/${id}/${adjId}`] = null;
         }
         if (AuthManager.isAdmin()) {

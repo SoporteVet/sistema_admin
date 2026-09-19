@@ -4276,7 +4276,7 @@ ${texto}</pre>
                         const meta = adj[aid];
                         const icon = App._sanctionAdjuntoIcon(meta.mimeType);
                         const name = App.escapeHtml(meta.nombreArchivo || aid);
-                        const size = PoliticaInternaManager.formatBytes(meta.tamañoBytes);
+                        const size = PoliticaInternaManager.formatBytes(meta.tamanoBytes ?? meta.tamañoBytes);
                         const aidJs = App.escapeJsString(aid);
                         const del = puedeEditar
                             ? `<button type="button" class="btn btn-sm btn-danger" onclick="App.eliminarSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-trash"></i></button>`
