@@ -271,7 +271,7 @@ class App {
             'estado-firmas': { title: 'Estado de Firmas', desc: 'Ver quién ha firmado y quién no' },
             'usuarios': { title: 'Usuarios', desc: 'Administración de usuarios' },
             'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' },
-            'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Cualquier usuario registra; admin ve todas y el encargado solo las suyas' },
+            'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Empleados ven las suyas; encargados las de su área; administración ve todo' },
             'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
             'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' }
         };
@@ -3917,7 +3917,10 @@ ${texto}</pre>
         const packs = { mis, cola_ti: colaTi, cola_rrhh: colaRrhh, cola_gg: colaGg, todos: isAdmin ? misTodos : [] };
 
         const allowedTabs = [];
-        if (!isAdmin) allowedTabs.push({ key: 'mis', label: 'Mis envíos', list: mis });
+        if (!isAdmin) {
+            const misLabel = user.rol === 'encargado' ? 'Mi departamento' : 'Mis quejas';
+            allowedTabs.push({ key: 'mis', label: misLabel, list: mis });
+        }
         if (isAdmin || deptTi) allowedTabs.push({ key: 'cola_ti', label: 'Cola TI', list: colaTi });
         if (isAdmin || deptRh) allowedTabs.push({ key: 'cola_rrhh', label: 'Cola RRHH', list: colaRrhh });
         if (isAdmin || deptGg) allowedTabs.push({ key: 'cola_gg', label: 'Cola Gerencia', list: colaGg });
@@ -3951,7 +3954,8 @@ ${texto}</pre>
                 </div>
                 <div class="card-body">
                     <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:12px;">
-                        Cualquier usuario puede registrar una queja. El administrador ve todas; el encargado de área solo las suyas.
+                        Cualquier usuario puede registrar una queja con fotos, videos o audios (hasta 8&nbsp;MB por archivo).
+                        Los <strong>empleados</strong> solo ven las suyas; los <strong>encargados</strong> las de su departamento; <strong>administración</strong> ve todo.
                         Flujo: registro → <strong>TI</strong> revisa (apartado solo TI) → <strong>RRHH</strong> anota → <strong>Gerencia</strong> cierra y aprueba.
                     </p>
                     <div class="tabs" id="sanctionMainTabs" style="flex-wrap:wrap;margin-bottom:10px;">${mainTabsHtml}</div>
@@ -4049,6 +4053,14 @@ ${texto}</pre>
                     <label>Texto del caso <span class="required">*</span></label>
                     <textarea class="form-control" id="sanctionCreateTexto" rows="8" required placeholder="Descripción del caso..."></textarea>
                 </div>
+                <div class="form-group">
+                    <label>Evidencias (opcional)</label>
+                    <input type="file" class="form-control" id="sanctionCreateArchivos" multiple
+                        accept="image/*,video/*,audio/*,application/pdf,.pdf">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin-top:6px;">
+                        Imágenes, video, audio o PDF. Máx. ${SanctionFollowupManager.MAX_ADJUNTOS_POR_TICKET} archivos, 8 MB c/u.
+                    </p>
+                </div>
                 ${visBlock}
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
                     <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
@@ -4062,11 +4074,12 @@ ${texto}</pre>
         e.preventDefault();
         const titulo = document.getElementById('sanctionCreateTitulo')?.value || '';
         const texto = document.getElementById('sanctionCreateTexto')?.value || '';
+        const archivos = document.getElementById('sanctionCreateArchivos')?.files;
         const form = document.getElementById('sanctionCreateForm');
         const boxes = form ? form.querySelectorAll('input[name="sanctionVisible"]:checked') : [];
         const visiblesParaIds = Array.from(boxes).map(b => b.value);
         try {
-            await SanctionFollowupManager.create({ titulo, texto, visiblesParaIds });
+            await SanctionFollowupManager.create({ titulo, texto, visiblesParaIds, archivos });
             Toast.success('Creado', 'El caso fue enviado. Pasará primero a revisión de TI.');
             App.closeModal();
             await App.refreshSanctionSharedNavItem();
@@ -4105,6 +4118,16 @@ ${texto}</pre>
                 </div>`;
         }
 
+        const adjBlock = `
+                <div class="form-group">
+                    <label>Agregar evidencias</label>
+                    <input type="file" class="form-control" id="sanctionEditArchivos" multiple
+                        accept="image/*,video/*,audio/*,application/pdf,.pdf">
+                    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.submitSanctionAdjuntos('${App.escapeJsString(ticketId)}')">
+                        <i class="fas fa-paperclip"></i> Subir seleccionados
+                    </button>
+                </div>`;
+
         const eTitulo = App.escapeHtml(t.titulo || '');
         const eTexto = App.escapeHtml(t.texto || '');
         const eId = App.escapeHtml(ticketId);
@@ -4129,6 +4152,7 @@ ${texto}</pre>
                     <label>Texto <span class="required">*</span></label>
                     <textarea class="form-control" id="sanctionEditTexto" rows="8" required>${eTexto}</textarea>
                 </div>
+                ${adjBlock}
                 ${estadoBlock}
                 ${visBlock}
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
@@ -4227,6 +4251,92 @@ ${texto}</pre>
                 <p style="font-size:0.88rem;color:var(--text-secondary);white-space:pre-wrap;margin-top:10px;">${excerpt}</p>
             </div>`;
         }).join('');
+    }
+
+    static _sanctionAdjuntoIcon(mime) {
+        const m = String(mime || '');
+        if (m.startsWith('image/')) return 'fa-image';
+        if (m.startsWith('video/')) return 'fa-video';
+        if (m.startsWith('audio/')) return 'fa-volume-high';
+        return 'fa-file-pdf';
+    }
+
+    static renderSanctionAdjuntosList(ticket, puedeEditar) {
+        const adj = ticket.adjuntos || {};
+        const ids = Object.keys(adj);
+        if (!ids.length) {
+            return `<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:12px;">Sin archivos adjuntos.</p>`;
+        }
+        const tid = App.escapeJsString(ticket.id);
+        return `
+            <div style="margin-top:16px;">
+                <h4 style="font-size:0.95rem;margin:0 0 10px;"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary);"></i>Evidencias adjuntas</h4>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                    ${ids.map((aid) => {
+                        const meta = adj[aid];
+                        const icon = App._sanctionAdjuntoIcon(meta.mimeType);
+                        const name = App.escapeHtml(meta.nombreArchivo || aid);
+                        const size = PoliticaInternaManager.formatBytes(meta.tamañoBytes);
+                        const aidJs = App.escapeJsString(aid);
+                        const del = puedeEditar
+                            ? `<button type="button" class="btn btn-sm btn-danger" onclick="App.eliminarSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-trash"></i></button>`
+                            : '';
+                        return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--border-light);border-radius:var(--radius-sm);">
+                            <i class="fas ${icon}" style="color:var(--primary);"></i>
+                            <span style="flex:1;font-size:0.88rem;">${name} <span style="color:var(--text-secondary);">(${size})</span></span>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="App.abrirSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-eye"></i> Ver</button>
+                            ${del}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+    }
+
+    static async abrirSanctionAdjunto(ticketId, adjId) {
+        try {
+            const { blob, nombreArchivo, meta } = await SanctionFollowupManager.getAdjuntoBlob(ticketId, adjId);
+            const url = URL.createObjectURL(blob);
+            const mime = meta.mimeType || blob.type || '';
+            if (mime.startsWith('image/') || mime.startsWith('video/') || mime.startsWith('audio/')) {
+                window.open(url, '_blank', 'noopener');
+            } else {
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = nombreArchivo;
+                a.click();
+            }
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async submitSanctionAdjuntos(ticketId) {
+        const input = document.getElementById('sanctionEditArchivos');
+        const files = input?.files;
+        if (!files || !files.length) {
+            Toast.info('Archivos', 'Seleccione uno o más archivos.');
+            return;
+        }
+        try {
+            await SanctionFollowupManager.addAdjuntos(ticketId, files);
+            Toast.success('Listo', 'Archivos subidos.');
+            App.closeModal();
+            App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
+    }
+
+    static async eliminarSanctionAdjunto(ticketId, adjId) {
+        if (!confirm('¿Eliminar este adjunto?')) return;
+        try {
+            await SanctionFollowupManager.deleteAdjunto(ticketId, adjId);
+            Toast.success('Eliminado', 'Adjunto quitado.');
+            App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
+        } catch (e) {
+            Toast.error('Error', e.message || String(e));
+        }
     }
 
     static async renderSeguimientoSancionesDetalle(id) {
@@ -4380,6 +4490,7 @@ ${texto}</pre>
                     </p>
                     <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:16px;"><strong>Pueden ver el relato del caso:</strong> ${App.escapeHtml(visLine)}</p>
                     <div style="padding:16px;background:var(--bg-main);border-radius:var(--radius-md);border:1px solid var(--border-light);white-space:pre-wrap;font-size:0.92rem;line-height:1.5;">${App.escapeHtml(ticket.texto || '')}</div>
+                    ${App.renderSanctionAdjuntosList(ticket, puedeEditarCuerpo)}
                     ${accionesCreador}
                     ${bloqueTi}
                     ${bloqueRrhh}

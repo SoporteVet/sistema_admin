@@ -2,12 +2,16 @@
 // SANCTIONS-FOLLOWUP.JS — Seguimiento de sanciones o quejas (tickets)
 // Veterinaria San Martín de Porres
 // Flujo: Cualquier usuario crea → TI (revisión privada) → RRHH (anotaciones) → Gerencia (cierre)
-// Visibilidad del listado: admin ve todas; encargado y empleado solo las que ellos crearon.
+// Visibilidad: admin todo; empleado solo las suyas; encargado las de su(s) departamento(s); flujo TI/RRHH/GG.
 // ============================================================
 
 class SanctionFollowupManager {
     static ESTADO_ESPERA = 'en_espera';
     static ESTADO_TERMINADO = 'terminado';
+
+    /** Adjuntos en RTDB (Base64), mismo enfoque que políticas internas — sin Storage de pago. */
+    static MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
+    static MAX_ADJUNTOS_POR_TICKET = 10;
 
     static FLUJO_PENDIENTE_TI = 'pendiente_ti';
     static FLUJO_PENDIENTE_RRHH = 'pendiente_rrhh';
@@ -103,6 +107,9 @@ class SanctionFollowupManager {
         if (!user || !ticket) return false;
         if (AuthManager.isAdmin()) return true;
         if (ticket.creadoPor === user.id) return true;
+        if (user.rol === 'encargado' && ticket.departamento && AuthManager.encargadoGestionaDepartamento(user, ticket.departamento)) {
+            return true;
+        }
         const vis = ticket.visiblesPara || {};
         if (vis[user.id]) return true;
 
@@ -187,7 +194,81 @@ class SanctionFollowupManager {
         return AuthManager.usuarioEnDepartamento(user, SANCTION_FOLLOWUP_DEPT.GERENCIA);
     }
 
-    static async create({ titulo, texto, visiblesParaIds }) {
+    static _mimeAdjuntoPermitido(mime, fileName) {
+        const m = String(mime || '').toLowerCase();
+        const name = String(fileName || '').toLowerCase();
+        if (m.startsWith('image/') || m.startsWith('video/') || m.startsWith('audio/')) return true;
+        if (m === 'application/pdf' || name.endsWith('.pdf')) return true;
+        return false;
+    }
+
+    static async _subirAdjunto(ticketId, file) {
+        const mime = file.type || 'application/octet-stream';
+        if (!this._mimeAdjuntoPermitido(mime, file.name)) {
+            throw new Error('Solo se permiten imágenes, video, audio o PDF');
+        }
+        if (file.size > this.MAX_ADJUNTO_BYTES) {
+            throw new Error(`Cada archivo debe ser menor a ${PoliticaInternaManager.formatBytes(this.MAX_ADJUNTO_BYTES)}`);
+        }
+        const user = AuthManager.getUser();
+        const adjId = dbRef.sanctionFollowups.child(ticketId).child('adjuntos').push().key;
+        const dataBase64 = await PoliticaInternaManager.fileToBase64Data(file);
+        const meta = {
+            nombreArchivo: file.name || 'adjunto',
+            mimeType: mime,
+            tamañoBytes: file.size,
+            fecha: new Date().toISOString(),
+            subidoPor: user.id
+        };
+        await db.ref().update({
+            [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: meta,
+            [`sanctionFollowupsAdjuntoFiles/${ticketId}/${adjId}`]: { dataBase64, mimeType: mime }
+        });
+        return adjId;
+    }
+
+    static async addAdjuntos(ticketId, files) {
+        const prev = await this.getById(ticketId);
+        if (!prev) throw new Error('Seguimiento no encontrado');
+        if (!this.puedeEditarCuerpo(prev)) throw new Error('Sin permiso para adjuntar archivos en esta etapa');
+        const list = Array.from(files || []).filter(Boolean);
+        if (list.length === 0) return [];
+        const actuales = Object.keys(prev.adjuntos || {}).length;
+        if (actuales + list.length > this.MAX_ADJUNTOS_POR_TICKET) {
+            throw new Error(`Máximo ${this.MAX_ADJUNTOS_POR_TICKET} archivos por queja`);
+        }
+        const ids = [];
+        for (const file of list) {
+            ids.push(await this._subirAdjunto(ticketId, file));
+        }
+        await dbRef.sanctionFollowups.child(ticketId).update({ fechaActualizacion: new Date().toISOString() });
+        return ids;
+    }
+
+    static async getAdjuntoBlob(ticketId, adjId) {
+        const ticket = await this.getById(ticketId);
+        if (!ticket || !this.puedeVer(ticket)) throw new Error('Sin permiso');
+        const meta = (ticket.adjuntos || {})[adjId];
+        if (!meta) throw new Error('Adjunto no encontrado');
+        const snap = await dbRef.sanctionFollowupsAdjuntoFiles.child(ticketId).child(adjId).once('value');
+        if (!snap.exists()) throw new Error('Contenido del adjunto no encontrado');
+        const { dataBase64, mimeType } = snap.val();
+        const blob = PoliticaInternaManager.base64ToBlob(dataBase64, mimeType || meta.mimeType);
+        return { blob, meta, nombreArchivo: meta.nombreArchivo || 'adjunto' };
+    }
+
+    static async deleteAdjunto(ticketId, adjId) {
+        const prev = await this.getById(ticketId);
+        if (!prev) throw new Error('Seguimiento no encontrado');
+        if (!this.puedeEditarCuerpo(prev)) throw new Error('Sin permiso para eliminar adjuntos');
+        await db.ref().update({
+            [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: null,
+            [`sanctionFollowupsAdjuntoFiles/${ticketId}/${adjId}`]: null,
+            [`sanctionFollowups/${ticketId}/fechaActualizacion`]: new Date().toISOString()
+        });
+    }
+
+    static async create({ titulo, texto, visiblesParaIds, archivos }) {
         const user = AuthManager.getUser();
         if (!this.puedeCrear()) {
             throw new Error('Debe iniciar sesión para registrar una queja');
@@ -230,7 +311,14 @@ class SanctionFollowupManager {
         await db.ref().update({
             [`sanctionFollowupsQueueTi/${ticketId}`]: true
         });
+        await db.ref().update({
+            [`sanctionFollowupsByDepartment/${user.departamento}/${ticketId}`]: true
+        });
         await this.syncVisibilityIndex(ticketId, visiblesPara, null);
+        const fileList = Array.from(archivos || []).filter(Boolean);
+        if (fileList.length) {
+            await this.addAdjuntos(ticketId, fileList);
+        }
         return { id: ticketId, ...ticket };
     }
 
@@ -394,6 +482,13 @@ class SanctionFollowupManager {
         updates[`sanctionFollowups/${id}`] = null;
         updates[`sanctionFollowupsByCreator/${prev.creadoPor}/${id}`] = null;
         updates[`sanctionFollowupsQueueTi/${id}`] = null;
+        if (prev.departamento) {
+            updates[`sanctionFollowupsByDepartment/${prev.departamento}/${id}`] = null;
+        }
+        const adjIds = Object.keys(prev.adjuntos || {});
+        for (const adjId of adjIds) {
+            updates[`sanctionFollowupsAdjuntoFiles/${id}/${adjId}`] = null;
+        }
         if (AuthManager.isAdmin()) {
             updates[`sanctionFollowupsTiReview/${id}`] = null;
             updates[`sanctionFollowupsRrhh/${id}`] = null;
@@ -414,12 +509,27 @@ class SanctionFollowupManager {
                 return this._sortByFechaDesc(snapshotToArray(snapshot));
             }
 
+            const idSet = new Set();
+
+            if (user.rol === 'encargado') {
+                const depts = AuthManager.getDepartamentosEncargado(user);
+                for (const dep of depts) {
+                    try {
+                        const depSnap = await dbRef.sanctionFollowupsByDepartment.child(dep).once('value');
+                        Object.keys(depSnap.val() || {}).forEach((tid) => idSet.add(tid));
+                    } catch (e) {
+                        console.warn('listForManager dept index:', dep, e);
+                    }
+                }
+            }
+
             const idxSnap = await dbRef.sanctionFollowupsByCreator.child(user.id).once('value');
-            const ids = Object.keys(idxSnap.val() || {});
+            Object.keys(idxSnap.val() || {}).forEach((tid) => idSet.add(tid));
+
             const tickets = [];
-            for (const tid of ids) {
+            for (const tid of idSet) {
                 const t = await this.getById(tid);
-                if (t && (t.estado !== undefined || t.flujoEtapa)) tickets.push(t);
+                if (t && this.puedeVer(t) && (t.estado !== undefined || t.flujoEtapa)) tickets.push(t);
             }
             return this._sortByFechaDesc(tickets);
         } catch (e) {
