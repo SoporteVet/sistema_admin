@@ -308,12 +308,11 @@ class SanctionFollowupManager {
             subidoPorNombre: `${user.nombre} ${user.apellido}`.trim(),
             origen: this._origenAdjunto(ticket)
         };
-        // Metadatos y binario bajo el mismo ticket (hereda lectura del caso).
+        const now = new Date().toISOString();
         await db.ref().update({
-            [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: meta
-        });
-        await db.ref().update({
-            [`sanctionFollowups/${ticketId}/adjuntoFiles/${adjId}`]: { dataBase64, mimeType: mime }
+            [`sanctionFollowups/${ticketId}/adjuntos/${adjId}`]: meta,
+            [`sanctionFollowups/${ticketId}/adjuntoFiles/${adjId}`]: { dataBase64, mimeType: mime },
+            [`sanctionFollowups/${ticketId}/fechaActualizacion`]: now
         });
         return adjId;
     }
@@ -332,7 +331,6 @@ class SanctionFollowupManager {
         for (const file of list) {
             ids.push(await this._subirAdjunto(ticketId, file, prev));
         }
-        await dbRef.sanctionFollowups.child(ticketId).update({ fechaActualizacion: new Date().toISOString() });
         return ids;
     }
 
