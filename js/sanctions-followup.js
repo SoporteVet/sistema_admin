@@ -12,6 +12,7 @@ class SanctionFollowupManager {
     /** Adjuntos en RTDB (Base64), mismo enfoque que políticas internas — sin Storage de pago. */
     static MAX_ADJUNTO_BYTES = 8 * 1024 * 1024;
     static MAX_ADJUNTOS_POR_TICKET = 10;
+    static _createInFlight = false;
 
     static FLUJO_PENDIENTE_TI = 'pendiente_ti';
     static FLUJO_PENDIENTE_RRHH = 'pendiente_rrhh';
@@ -295,6 +296,18 @@ class SanctionFollowupManager {
     }
 
     static async create({ titulo, texto, visiblesParaIds, archivos }) {
+        if (this._createInFlight) {
+            throw new Error('Ya se está enviando una queja. Espere un momento.');
+        }
+        this._createInFlight = true;
+        try {
+            return await this._createInternal({ titulo, texto, visiblesParaIds, archivos });
+        } finally {
+            this._createInFlight = false;
+        }
+    }
+
+    static async _createInternal({ titulo, texto, visiblesParaIds, archivos }) {
         const user = AuthManager.getUser();
         if (!this.puedeCrear()) {
             throw new Error('Debe iniciar sesión para registrar una queja');
@@ -513,16 +526,13 @@ class SanctionFollowupManager {
 
         await this.syncVisibilityIndex(id, {}, prev.visiblesPara || {});
         const updates = {};
+        // Borrar el ticket entero (incluye adjuntos/adjuntoFiles). No mezclar rutas hijas
+        // en el mismo update: Firebase rechaza ancestro + descendiente a la vez.
         updates[`sanctionFollowups/${id}`] = null;
         updates[`sanctionFollowupsByCreator/${prev.creadoPor}/${id}`] = null;
         updates[`sanctionFollowupsQueueTi/${id}`] = null;
         if (prev.departamento) {
             updates[`sanctionFollowupsByDepartment/${prev.departamento}/${id}`] = null;
-        }
-        const adjIds = Object.keys(prev.adjuntos || {});
-        for (const adjId of adjIds) {
-            updates[`sanctionFollowups/${id}/adjuntoFiles/${adjId}`] = null;
-            updates[`sanctionFollowupsAdjuntoFiles/${id}/${adjId}`] = null;
         }
         if (AuthManager.isAdmin()) {
             updates[`sanctionFollowupsTiReview/${id}`] = null;
@@ -531,6 +541,8 @@ class SanctionFollowupManager {
             updates[`sanctionFollowupsQueueGg/${id}`] = null;
         }
         await db.ref().update(updates);
+        // Árbol legacy de adjuntos (si existió)
+        await db.ref(`sanctionFollowupsAdjuntoFiles/${id}`).remove().catch(() => {});
         return true;
     }
 
@@ -566,7 +578,11 @@ class SanctionFollowupManager {
                 const t = await this.getById(tid);
                 if (t && this.puedeVer(t) && (t.estado !== undefined || t.flujoEtapa)) tickets.push(t);
             }
-            return this._sortByFechaDesc(tickets);
+            const byId = new Map();
+            for (const t of tickets) {
+                if (t && t.id) byId.set(t.id, t);
+            }
+            return this._sortByFechaDesc([...byId.values()]);
         } catch (e) {
             console.error('listForManager:', e);
             return [];

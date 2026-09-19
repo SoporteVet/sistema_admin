@@ -4072,10 +4072,18 @@ ${texto}</pre>
 
     static async submitSanctionCreate(e) {
         e.preventDefault();
+        const form = document.getElementById('sanctionCreateForm');
+        const submitBtn = form?.querySelector('button[type="submit"]');
+        if (form?.dataset.submitting === '1') return;
+        if (form) form.dataset.submitting = '1';
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.dataset.label = submitBtn.innerHTML;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enviando…';
+        }
         const titulo = document.getElementById('sanctionCreateTitulo')?.value || '';
         const texto = document.getElementById('sanctionCreateTexto')?.value || '';
         const archivos = document.getElementById('sanctionCreateArchivos')?.files;
-        const form = document.getElementById('sanctionCreateForm');
         const boxes = form ? form.querySelectorAll('input[name="sanctionVisible"]:checked') : [];
         const visiblesParaIds = Array.from(boxes).map(b => b.value);
         try {
@@ -4086,6 +4094,11 @@ ${texto}</pre>
             App.navigate('seguimiento-sanciones');
         } catch (err) {
             Toast.error('Error', err.message || String(err));
+            if (form) delete form.dataset.submitting;
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                if (submitBtn.dataset.label) submitBtn.innerHTML = submitBtn.dataset.label;
+            }
         }
     }
 
