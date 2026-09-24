@@ -3957,6 +3957,7 @@ ${texto}</pre>
                         Cualquier usuario puede registrar una queja con fotos, videos o audios (hasta 8&nbsp;MB por archivo).
                         Los <strong>empleados</strong> solo ven las suyas; los <strong>encargados</strong> las de su departamento; <strong>administración</strong> ve todo.
                         Flujo: registro → <strong>TI</strong> revisa (apartado solo TI) → <strong>RRHH</strong> anota → <strong>Gerencia</strong> cierra y aprueba.
+                        ${deptTi || deptRh ? `<br><strong style="color:var(--primary);">TI / RRHH:</strong> en <em>Ver detalle</em>, suba archivos solo en <em>Evidencias del caso</em> mientras el caso esté en su cola.` : ''}
                     </p>
                     <div class="tabs" id="sanctionMainTabs" style="flex-wrap:wrap;margin-bottom:10px;">${mainTabsHtml}</div>
                     <div class="tabs" id="sanctionMgrTabs" style="flex-wrap:wrap;margin-bottom:16px;">
@@ -4003,7 +4004,7 @@ ${texto}</pre>
                 <p style="font-size:0.88rem;color:var(--text-secondary);white-space:pre-wrap;margin-top:10px;">${excerpt}</p>
                 <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
                     <button type="button" class="btn btn-sm btn-outline" onclick="App.openSanctionDetalle('${idJs}','manager')"><i class="fas fa-eye"></i> Ver detalle</button>
-                    ${puede ? `<button type="button" class="btn btn-sm btn-primary" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar</button>` : ''}
+                    ${puede ? `<button type="button" class="btn btn-sm btn-outline" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar</button>` : ''}
                 </div>
             </div>`;
         }).join('');
@@ -4179,18 +4180,6 @@ ${texto}</pre>
                 </div>`;
         }
 
-        const adjBlock = SanctionFollowupManager.puedeAdjuntarArchivos(t)
-            ? `
-                <div class="form-group">
-                    <label>Agregar evidencias</label>
-                    <input type="file" class="form-control" id="sanctionEditArchivos" multiple
-                        accept="image/*,video/*,audio/*,application/pdf,.pdf">
-                    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.submitSanctionAdjuntos('${App.escapeJsString(ticketId)}')">
-                        <i class="fas fa-paperclip"></i> Subir seleccionados
-                    </button>
-                </div>`
-            : '';
-
         const eTitulo = App.escapeHtml(t.titulo || '');
         const eTexto = App.escapeHtml(t.texto || '');
         const eId = App.escapeHtml(ticketId);
@@ -4215,7 +4204,7 @@ ${texto}</pre>
                     <label>Texto <span class="required">*</span></label>
                     <textarea class="form-control" id="sanctionEditTexto" rows="8" required>${eTexto}</textarea>
                 </div>
-                ${adjBlock}
+                <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 12px;"><i class="fas fa-paperclip"></i> Fotos y videos se suben en el detalle del caso, sección <strong>Evidencias del caso</strong>.</p>
                 ${estadoBlock}
                 ${visBlock}
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
@@ -4329,10 +4318,49 @@ ${texto}</pre>
         return m[origen] || origen || '';
     }
 
+    /** Línea de auditoría: quién subió el archivo y cuándo (día y hora). */
+    static _sanctionAdjuntoSubidaLine(meta) {
+        if (!meta) return '';
+        const quien = meta.subidoPorNombre
+            ? App.escapeHtml(String(meta.subidoPorNombre).trim())
+            : (meta.subidoPor ? App.escapeHtml(meta.subidoPor) : 'Usuario no registrado');
+        const cuando = meta.fecha ? formatDateTime(meta.fecha) : 'Fecha no registrada';
+        const origen = App._etiquetaOrigenAdjunto(meta.origen || meta.origenEtapa);
+        const rol = origen ? ` · ${App.escapeHtml(origen)}` : '';
+        return `<br><span style="font-size:0.78rem;color:var(--text-secondary);"><strong>${quien}</strong>${rol}<br><i class="far fa-clock" style="margin-right:4px;"></i>${App.escapeHtml(cuando)}</span>`;
+    }
+
+    static _sanctionAdjuntosUploadHtml(ticketId, inputId = 'sanctionDetalleArchivos') {
+        const tid = App.escapeJsString(ticketId);
+        const iid = App.escapeHtml(inputId);
+        return `
+                <div style="margin-top:12px;padding:14px;background:var(--bg-main);border:1px dashed var(--border-light);border-radius:var(--radius-md);">
+                    <p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 10px;">
+                        Imagen, video, audio o PDF · máx. ${SanctionFollowupManager.MAX_ADJUNTOS_POR_TICKET} archivos, 8 MB c/u
+                    </p>
+                    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
+                        <input type="file" class="form-control" id="${iid}" multiple
+                            accept="image/*,video/*,audio/*,application/pdf,.pdf"
+                            style="flex:1;min-width:200px;margin:0;">
+                        <button type="button" class="btn btn-primary btn-sm" onclick="App.submitSanctionAdjuntosFromInput('${tid}','${App.escapeJsString(inputId)}')">
+                            <i class="fas fa-upload"></i> Subir
+                        </button>
+                    </div>
+                </div>`;
+    }
+
+    static _sanctionEvidenciasHintArriba() {
+        return `<p style="font-size:0.8rem;color:var(--text-secondary);margin:10px 0 0;"><i class="fas fa-arrow-up"></i> Evidencias (fotos/videos): sección <a href="#" onclick="event.preventDefault();document.getElementById('sanction-evidencias')?.scrollIntoView({behavior:'smooth'});">Evidencias del caso</a>.</p>`;
+    }
+
     static renderSanctionAdjuntosBlock(ticket) {
         const puedeSubir = SanctionFollowupManager.puedeAdjuntarArchivos(ticket);
         const adj = ticket.adjuntos || {};
-        const ids = Object.keys(adj);
+        const ids = Object.keys(adj).sort((a, b) => {
+            const fa = adj[a]?.fecha ? new Date(adj[a].fecha).getTime() : 0;
+            const fb = adj[b]?.fecha ? new Date(adj[b].fecha).getTime() : 0;
+            return fb - fa;
+        });
         const tid = App.escapeJsString(ticket.id);
         const lista = ids.length
             ? ids.map((aid) => {
@@ -4341,37 +4369,29 @@ ${texto}</pre>
                 const name = App.escapeHtml(meta.nombreArchivo || aid);
                 const size = PoliticaInternaManager.formatBytes(meta.tamanoBytes ?? meta.tamañoBytes);
                 const aidJs = App.escapeJsString(aid);
-                const quien = meta.subidoPorNombre
-                    ? App.escapeHtml(meta.subidoPorNombre)
-                    : App.escapeHtml(meta.subidoPor || '');
-                const origen = App._etiquetaOrigenAdjunto(meta.origen || meta.origenEtapa);
                 const del = SanctionFollowupManager.puedeEliminarAdjunto(ticket, meta)
                     ? `<button type="button" class="btn btn-sm btn-danger" onclick="App.eliminarSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-trash"></i></button>`
                     : '';
                 return `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px;border:1px solid var(--border-light);border-radius:var(--radius-sm);">
                     <i class="fas ${icon}" style="color:var(--primary);"></i>
                     <span style="flex:1;font-size:0.88rem;">${name} <span style="color:var(--text-secondary);">(${size})</span>
-                    ${quien ? `<br><span style="font-size:0.78rem;color:var(--text-secondary);">Subido por ${quien}${origen ? ` · ${App.escapeHtml(origen)}` : ''}</span>` : ''}</span>
+                    ${App._sanctionAdjuntoSubidaLine(meta)}</span>
                     <button type="button" class="btn btn-sm btn-outline" onclick="App.abrirSanctionAdjunto('${tid}','${aidJs}')"><i class="fas fa-eye"></i> Ver</button>
                     ${del}
                 </div>`;
             }).join('')
             : `<p style="font-size:0.85rem;color:var(--text-secondary);">Sin archivos adjuntos.</p>`;
 
-        const subir = puedeSubir ? `
-                <div class="form-group" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border-light);">
-                    <label>Agregar evidencias (imagen, video, audio o PDF)</label>
-                    <input type="file" class="form-control" id="sanctionDetalleArchivos" multiple
-                        accept="image/*,video/*,audio/*,application/pdf,.pdf">
-                    <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.submitSanctionDetalleAdjuntos('${tid}')">
-                        <i class="fas fa-paperclip"></i> Subir archivos
-                    </button>
-                </div>` : '';
+        const subir = puedeSubir ? App._sanctionAdjuntosUploadHtml(ticket.id) : '';
+        const hintSubir = puedeSubir
+            ? `<p style="font-size:0.82rem;color:var(--text-secondary);margin:0 0 12px;">${AuthManager.isAdmin() ? 'Como administrador puede adjuntar en cualquier etapa. ' : ''}Cada archivo muestra quién lo subió y la fecha/hora.</p>`
+            : '';
 
         return `
-            <div style="margin-top:16px;">
-                <h4 style="font-size:0.95rem;margin:0 0 10px;"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary);"></i>Evidencias del caso</h4>
-                <div style="display:flex;flex-direction:column;gap:8px;">${lista}</div>
+            <div id="sanction-evidencias" style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-light);">
+                <h4 style="font-size:0.95rem;margin:0 0 8px;"><i class="fas fa-paperclip" style="margin-right:8px;color:var(--primary);"></i>Evidencias del caso</h4>
+                ${hintSubir}
+                <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:${puedeSubir ? '0' : '4px'};">${lista}</div>
                 ${subir}
             </div>`;
     }
@@ -4395,40 +4415,28 @@ ${texto}</pre>
         }
     }
 
-    static async submitSanctionAdjuntos(ticketId) {
-        const input = document.getElementById('sanctionEditArchivos');
+    static async submitSanctionAdjuntosFromInput(ticketId, inputId, { closeModal = false } = {}) {
+        const input = document.getElementById(inputId);
         const files = input?.files;
         if (!files || !files.length) {
             Toast.info('Archivos', 'Seleccione uno o más archivos.');
             return;
         }
-        try {
-            await SanctionFollowupManager.addAdjuntos(ticketId, files);
-            Toast.success('Listo', 'Archivos subidos.');
-            App.closeModal();
-            App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
-        } catch (e) {
-            Toast.error('Error', e.message || String(e));
-        }
-    }
-
-    static async submitSanctionDetalleAdjuntos(ticketId) {
-        const input = document.getElementById('sanctionDetalleArchivos');
-        const files = input?.files;
-        if (!files || !files.length) {
-            Toast.info('Archivos', 'Seleccione uno o más archivos.');
-            return;
-        }
-        const btn = input?.parentElement?.querySelector('button');
+        const btn = input?.parentElement?.querySelector('button[type="button"]');
         if (btn) btn.disabled = true;
         try {
             await SanctionFollowupManager.addAdjuntos(ticketId, files);
             Toast.success('Listo', 'Evidencias subidas al caso.');
+            if (closeModal) App.closeModal();
             App.navigate('seguimiento-sanciones-detalle', { id: ticketId });
         } catch (e) {
             Toast.error('Error', e.message || String(e));
             if (btn) btn.disabled = false;
         }
+    }
+
+    static async submitSanctionDetalleAdjuntos(ticketId) {
+        return App.submitSanctionAdjuntosFromInput(ticketId, 'sanctionDetalleArchivos', { closeModal: false });
     }
 
     static async eliminarSanctionAdjunto(ticketId, adjId) {
@@ -4511,7 +4519,8 @@ ${texto}</pre>
                                 <label>Notas internas TI</label>
                                 <textarea class="form-control" id="sanctionTiNotas" rows="4" placeholder="Observaciones técnicas o de revisión..."></textarea>
                             </div>
-                            <button type="button" class="btn btn-primary" onclick="App.submitSanctionTiRevision('${idJs}')"><i class="fas fa-check"></i> Revisado — enviar a RRHH</button>
+                            ${App._sanctionEvidenciasHintArriba()}
+                            <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="App.submitSanctionTiRevision('${idJs}')"><i class="fas fa-check"></i> Revisado — enviar a RRHH</button>
                         </div>
                     </div>`;
             } else if (flujoEtapa === SanctionFollowupManager.FLUJO_PENDIENTE_TI && SanctionFollowupManager.ticketTieneFlujoEtapa(ticket)) {
@@ -4533,7 +4542,8 @@ ${texto}</pre>
                             <textarea class="form-control" id="sanctionRrhhAnot" rows="6" ${puedeEditarRrhh ? '' : 'readonly'} placeholder="Registre las anotaciones del caso...">${txt}</textarea>
                         </div>
                         ${puedeEditarRrhh ? `
-                            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                            ${App._sanctionEvidenciasHintArriba()}
+                            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;">
                                 <button type="button" class="btn btn-outline" onclick="App.submitSanctionRrhhGuardar('${idJs}')"><i class="fas fa-save"></i> Guardar anotaciones</button>
                                 <button type="button" class="btn btn-primary" onclick="App.submitSanctionRrhhEnviarGerencia('${idJs}')"><i class="fas fa-arrow-right"></i> Enviar a Gerencia General</button>
                             </div>` : ''}
@@ -4571,8 +4581,8 @@ ${texto}</pre>
         }
 
         const accionesCreador = puedeEditarCuerpo ? `
-                    <div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap;">
-                        <button type="button" class="btn btn-primary btn-sm" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar texto / visibilidad</button>
+                    <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-outline btn-sm" onclick="App.showSanctionEditModal('${idJs}')"><i class="fas fa-edit"></i> Editar texto / visibilidad</button>
                         <button type="button" class="btn btn-danger btn-sm" onclick="App.eliminarSanction('${idJs}')"><i class="fas fa-trash"></i> Eliminar</button>
                     </div>` : '';
 
