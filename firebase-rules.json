@@ -198,26 +198,33 @@
 
     "sanctionFollowups": {
       ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
-      ".indexOn": ["creadoPor"],
+      ".indexOn": ["creadoPor", "departamento"],
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
           data.child('creadoPor').val() === auth.uid ||
           data.child('visiblesPara').hasChild(auth.uid) ||
           (
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+            (
+              data.child('departamento').val() === root.child('users').child(auth.uid).child('departamento').val() ||
+              root.child('users').child(auth.uid).child('departamentosEncargado').child(data.child('departamento').val()).val() === true
+            )
+          ) ||
+          (
             data.hasChild('flujoEtapa') &&
             data.child('flujoEtapa').val() === 'pendiente_ti' &&
-            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
           ) ||
           (
             data.hasChild('flujoEtapa') &&
             (data.child('flujoEtapa').val() === 'pendiente_rrhh' || data.child('flujoEtapa').val() === 'pendiente_gerencia' || data.child('flujoEtapa').val() === 'cerrado') &&
-            root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true)
           ) ||
           (
             data.hasChild('flujoEtapa') &&
             (data.child('flujoEtapa').val() === 'pendiente_gerencia' || data.child('flujoEtapa').val() === 'cerrado') &&
-            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
           )
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
@@ -234,10 +241,18 @@
             (
               data.child('creadoPor').val() === auth.uid &&
               (!data.hasChild('flujoEtapa') || data.child('flujoEtapa').val() === 'pendiente_ti')
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) &&
+              data.child('flujoEtapa').val() === 'pendiente_ti'
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) &&
+              data.child('flujoEtapa').val() === 'pendiente_rrhh'
             )
           ))
         )",
-        ".validate": "!newData.exists() || !data.exists() || newData.hasChildren(['titulo', 'texto', 'estado', 'flujoEtapa', 'creadoPor', 'creadoPorNombre', 'departamento', 'fechaCreacion', 'fechaActualizacion', 'visiblesPara'])",
+        ".validate": "!newData.exists() || !data.exists() || newData.hasChildren(['titulo', 'texto', 'estado', 'flujoEtapa', 'creadoPor', 'creadoPorNombre', 'departamento', 'fechaCreacion', 'fechaActualizacion'])",
         "titulo": {
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 300"
         },
@@ -245,23 +260,41 @@
           ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 50000"
         },
         "fechaActualizacion": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid &&
+              (
+                !root.child('sanctionFollowups').child($ticketId).hasChild('flujoEtapa') ||
+                root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_ti'
+              )
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) &&
+              root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_ti'
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) &&
+              root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_rrhh'
+            )
+          )",
           ".validate": "!newData.exists() || newData.isString()"
         },
         "flujoEtapa": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
             (
-              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' &&
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) &&
               data.val() === 'pendiente_ti' &&
               newData.val() === 'pendiente_rrhh'
             ) ||
             (
-              root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' &&
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) &&
               data.val() === 'pendiente_rrhh' &&
               newData.val() === 'pendiente_gerencia'
             ) ||
             (
-              root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' &&
+              (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true) &&
               data.val() === 'pendiente_gerencia' &&
               newData.val() === 'cerrado'
             )
@@ -272,7 +305,7 @@
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
             (
-              root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' &&
+              (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true) &&
               root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_gerencia' &&
               newData.val() === 'terminado'
             )
@@ -282,40 +315,126 @@
         "fechaCierre": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
           )",
           ".validate": "!newData.exists() || newData.isString()"
         },
         "gerenciaAprobado": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
           )",
           ".validate": "!newData.exists() || newData.isBoolean()"
         },
         "gerenciaComentario": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
           )",
           ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 5000)"
         },
         "gerenciaPor": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
           )",
           ".validate": "!newData.exists() || newData.isString()"
         },
         "gerenciaFecha": {
           ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
             root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-            root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
           )",
           ".validate": "!newData.exists() || newData.isString()"
         },
         "creadoPor": {
           ".validate": "newData.isString()"
+        },
+        "adjuntos": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              data.parent().child('creadoPor').val() === auth.uid &&
+              (
+                !data.parent().hasChild('flujoEtapa') ||
+                data.parent().child('flujoEtapa').val() === 'pendiente_ti'
+              )
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) &&
+              data.parent().child('flujoEtapa').val() === 'pendiente_ti'
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) &&
+              data.parent().child('flujoEtapa').val() === 'pendiente_rrhh'
+            )
+          )",
+          "$adjId": {
+            ".validate": "!newData.exists() || (
+              newData.hasChildren(['nombreArchivo', 'mimeType', 'tamanoBytes', 'fecha', 'subidoPor']) &&
+              newData.child('nombreArchivo').isString() &&
+              newData.child('nombreArchivo').val().length > 0 &&
+              newData.child('nombreArchivo').val().length <= 260 &&
+              newData.child('mimeType').isString() &&
+              newData.child('mimeType').val().length <= 120 &&
+              (
+                newData.child('mimeType').val().matches(/^image\\//) ||
+                newData.child('mimeType').val().matches(/^video\\//) ||
+                newData.child('mimeType').val().matches(/^audio\\//) ||
+                newData.child('mimeType').val() === 'application/pdf'
+              ) &&
+              newData.child('tamanoBytes').isNumber() &&
+              newData.child('tamanoBytes').val() >= 0 &&
+              newData.child('tamanoBytes').val() <= 8388608 &&
+              newData.child('fecha').isString() &&
+              newData.child('subidoPor').isString() &&
+              newData.child('subidoPor').val() === auth.uid &&
+              (!newData.hasChild('subidoPorNombre') || (
+                newData.child('subidoPorNombre').isString() &&
+                newData.child('subidoPorNombre').val().length <= 200
+              )) &&
+              (!newData.hasChild('origen') || (
+                newData.child('origen').isString() &&
+                (newData.child('origen').val() === 'empleado' || newData.child('origen').val() === 'ti' || newData.child('origen').val() === 'rrhh' || newData.child('origen').val() === 'admin')
+              ))
+            )"
+          }
+        },
+        "adjuntoFiles": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              data.parent().child('creadoPor').val() === auth.uid &&
+              (
+                !data.parent().hasChild('flujoEtapa') ||
+                data.parent().child('flujoEtapa').val() === 'pendiente_ti'
+              )
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) &&
+              data.parent().child('flujoEtapa').val() === 'pendiente_ti'
+            ) ||
+            (
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) &&
+              data.parent().child('flujoEtapa').val() === 'pendiente_rrhh'
+            )
+          )",
+          "$adjId": {
+            ".validate": "!newData.exists() || (
+              newData.hasChildren(['dataBase64', 'mimeType']) &&
+              newData.child('dataBase64').isString() &&
+              newData.child('dataBase64').val().length >= 20 &&
+              newData.child('dataBase64').val().length <= 11500000 &&
+              newData.child('mimeType').isString() &&
+              newData.child('mimeType').val().length <= 120 &&
+              (
+                newData.child('mimeType').val().matches(/^image\\//) ||
+                newData.child('mimeType').val().matches(/^video\\//) ||
+                newData.child('mimeType').val().matches(/^audio\\//) ||
+                newData.child('mimeType').val() === 'application/pdf'
+              )
+            )"
+          }
         }
       }
     },
@@ -324,12 +443,12 @@
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-          root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+          (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
           (
-            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' &&
+            (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) &&
             root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_ti'
           )
         )",
@@ -341,13 +460,13 @@
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-          root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' ||
-          root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) ||
+          (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
           (
-            root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' &&
+            (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) &&
             root.child('sanctionFollowups').child($ticketId).child('flujoEtapa').val() === 'pendiente_rrhh'
           )
         )",
@@ -358,12 +477,12 @@
     "sanctionFollowupsQueueTi": {
       ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
         root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-        root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+        (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
       )",
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-          root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+          (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
@@ -376,7 +495,7 @@
             !newData.exists() &&
             (
               root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) ||
               root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid
             )
           )
@@ -388,26 +507,26 @@
     "sanctionFollowupsQueueRrhh": {
       ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
         root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-        root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+        (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true)
       )",
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-          root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+          (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true)
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
           (
             newData.exists() &&
             newData.val() === true &&
-            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
           ) ||
           (
             !newData.exists() &&
             (
               root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-              root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' ||
-              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500'
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true) ||
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
             )
           )
         )",
@@ -418,26 +537,26 @@
     "sanctionFollowupsQueueGg": {
       ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
         root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-        root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+        (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
       )",
       "$ticketId": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-          root.child('users').child(auth.uid).child('departamento').val() === 'DG-100'
+          (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true)
         )",
         ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
           root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
           (
             newData.exists() &&
             newData.val() === true &&
-            root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+            (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true)
           ) ||
           (
             !newData.exists() &&
             (
               root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
-              root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' ||
-              root.child('users').child(auth.uid).child('departamento').val() === 'RH-300'
+              (root.child('users').child(auth.uid).child('departamento').val() === 'DG-100' || root.child('users').child(auth.uid).child('departamentosEncargado').child('DG-100').val() === true) ||
+              (root.child('users').child(auth.uid).child('departamento').val() === 'RH-300' || root.child('users').child(auth.uid).child('departamentosEncargado').child('RH-300').val() === true)
             )
           )
         )",
@@ -457,6 +576,56 @@
             auth.uid === $creatorUid
           )",
           ".validate": "!newData.exists() || newData.val() === true"
+        }
+      }
+    },
+
+    "sanctionFollowupsByDepartment": {
+      "$deptId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).exists() && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+            (
+              $deptId === root.child('users').child(auth.uid).child('departamento').val() ||
+              root.child('users').child(auth.uid).child('departamentosEncargado').child($deptId).val() === true
+            )
+          )
+        )",
+        "$ticketId": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              !data.exists() &&
+              newData.val() === true &&
+              root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid &&
+              root.child('sanctionFollowups').child($ticketId).child('departamento').val() === $deptId
+            ) ||
+            (
+              !newData.exists() &&
+              (
+                root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+                root.child('sanctionFollowups').child($ticketId).child('creadoPor').val() === auth.uid
+              )
+            )
+          )",
+          ".validate": "!newData.exists() || newData.val() === true"
+        }
+      }
+    },
+
+    "sanctionFollowupsSubmitTokens": {
+      "$uid": {
+        ".read": "auth != null && auth.uid === $uid",
+        "$tokenId": {
+          ".write": "auth != null && auth.uid === $uid && root.child('users').child(auth.uid).exists()",
+          ".validate": "!newData.exists() || (
+            newData.hasChildren(['status', 'startedAt']) &&
+            newData.child('status').isString() &&
+            (newData.child('status').val() === 'pending' || newData.child('status').val() === 'done') &&
+            newData.child('startedAt').isNumber() &&
+            (!newData.hasChild('ticketId') || newData.child('ticketId').isString())
+          )"
         }
       }
     },
@@ -702,6 +871,11 @@
           ".validate": "newData.isString()"
         }
       }
+    },
+
+    "emailDeliveryLog": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
+      ".write": false
     }
   }
 }
