@@ -5905,11 +5905,15 @@ ${texto}</pre>
             this.paintInventario();
         } catch (error) {
             console.error('Error cargando inventario:', error);
+            const permiso = /permission_denied|PERMISSION_DENIED/i.test(`${error.code || ''} ${error.message || ''}`);
+            const detalle = permiso
+                ? 'La base de datos aún no autoriza el inventario. Hay que publicar en Firebase las reglas del nodo inventario y luego reintentar.'
+                : this.escapeHtml(error.message || 'Error de conexión');
             content.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i>
                     <h3>No se pudo cargar el inventario</h3>
-                    <p>${this.escapeHtml(error.message || 'Error de conexión')}</p>
+                    <p>${detalle}</p>
                     <button class="btn btn-primary" onclick="App.navigate('inventario')">Reintentar</button>
                 </div>`;
         }
