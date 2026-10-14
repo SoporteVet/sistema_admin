@@ -221,6 +221,7 @@ class App {
                 case 'seguimiento-sanciones': await this.renderSeguimientoSanciones(); break;
                 case 'seguimiento-compartidos': await this.renderSeguimientoCompartidos(); break;
                 case 'seguimiento-sanciones-detalle': await this.renderSeguimientoSancionesDetalle(params.id); break;
+                case 'inventario': await this.renderInventario(); break;
                 default: await this.renderDashboard();
             }
             contentArea.className = 'content-area fade-in';
@@ -273,7 +274,8 @@ class App {
             'departamentos': { title: 'Departamentos', desc: 'Gestión de departamentos' },
             'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Empleados ven las suyas; encargados las de su área; administración ve todo' },
             'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
-            'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' }
+            'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' },
+            'inventario': { title: 'Inventario', desc: 'Equipos y dispositivos del departamento de TI' }
         };
         const info = titles[view] || titles['dashboard'];
         document.getElementById('pageTitle').textContent = info.title;
@@ -298,6 +300,10 @@ class App {
             const show = roles.includes(user.rol) || roles.includes('all') || user.rol === 'admin';
             item.style.display = show ? 'flex' : 'none';
         });
+        const sectionInv = document.getElementById('navSectionInventario');
+        if (sectionInv) {
+            sectionInv.style.display = (typeof usuarioVeInventario === 'function' && usuarioVeInventario(user)) ? '' : 'none';
+        }
         this.refreshSanctionSharedNavItem();
     }
 
@@ -5869,6 +5875,205 @@ ${texto}</pre>
             await NotificationManager.markAllAsRead(user.id);
             this.renderNotifications();
             Toast.success('Listo', 'Notificaciones marcadas como leídas');
+        }
+    }
+
+    // ========================================================
+    // INVENTARIO (TI)
+    // ========================================================
+    static inventarioEstadoClass(estado) {
+        if (estado === 'En uso') return 'aprobada';
+        if (estado === 'Dado de baja') return 'rechazada';
+        return 'pendiente';
+    }
+
+    static async renderInventario() {
+        const content = document.getElementById('contentArea');
+        const user = AuthManager.getUser();
+        if (typeof usuarioVeInventario !== 'function' || !usuarioVeInventario(user)) {
+            content.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>El inventario está disponible para Tecnologías de Información y administración.</p></div>`;
+            return;
+        }
+        try {
+            this._inventarioQuery = '';
+            this._inventarioItems = await InventarioManager.getAll();
+            this.paintInventario();
+        } catch (error) {
+            console.error('Error cargando inventario:', error);
+            content.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i>
+                    <h3>No se pudo cargar el inventario</h3>
+                    <p>${this.escapeHtml(error.message || 'Error de conexión')}</p>
+                    <button class="btn btn-primary" onclick="App.navigate('inventario')">Reintentar</button>
+                </div>`;
+        }
+    }
+
+    static filterInventario(query) {
+        this._inventarioQuery = query || '';
+        this.paintInventarioRows();
+    }
+
+    static paintInventario() {
+        const content = document.getElementById('contentArea');
+        if (!content || this.currentView !== 'inventario') return;
+        const total = (this._inventarioItems || []).length;
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header">
+                    <h3><i class="fas fa-boxes-stacked" style="margin-right:8px;color:var(--primary);"></i>Inventario <span id="inventarioConteo" style="font-weight:500;color:var(--text-secondary);">(${total})</span></h3>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="App.showInventarioForm()"><i class="fas fa-plus"></i> Nuevo equipo</button>
+                </div>
+                <div class="card-body" style="padding-bottom:0;">
+                    <div class="form-group">
+                        <input type="search" class="form-control" id="inventarioBusqueda" placeholder="Buscar por nombre, serie, ubicación o responsable" value="${this.escapeHtml(this._inventarioQuery || '')}" oninput="App.filterInventario(this.value)">
+                    </div>
+                </div>
+                <div class="card-body no-padding" id="inventarioResultados"></div>
+            </div>`;
+        this.paintInventarioRows();
+    }
+
+    static paintInventarioRows() {
+        const host = document.getElementById('inventarioResultados');
+        if (!host || this.currentView !== 'inventario') return;
+        const query = String(this._inventarioQuery || '').trim().toLowerCase();
+        const all = this._inventarioItems || [];
+        const conteo = document.getElementById('inventarioConteo');
+        if (conteo) conteo.textContent = `(${all.length})`;
+        const items = query
+            ? all.filter((item) => {
+                const blob = [item.nombre, item.tipo, item.marca, item.modelo, item.serie, item.ubicacion, item.asignadoA, item.estado, item.observaciones]
+                    .map((v) => String(v || '').toLowerCase())
+                    .join(' ');
+                return blob.includes(query);
+            })
+            : all;
+
+        if (!items.length) {
+            host.innerHTML = `<div class="empty-state">
+                <i class="fas fa-boxes-stacked"></i>
+                <h3>${query ? 'Sin resultados' : 'El inventario está vacío'}</h3>
+                <p>${query ? 'Pruebe con otro nombre, serie o ubicación.' : 'Registre el primer equipo del departamento de TI.'}</p>
+                ${query ? '' : '<button type="button" class="btn btn-primary" onclick="App.showInventarioForm()"><i class="fas fa-plus"></i> Nuevo equipo</button>'}
+            </div>`;
+            return;
+        }
+
+        const rows = items.map((item) => {
+            const id = this.escapeJsString(item.id);
+            const detalle = [item.marca, item.modelo].filter(Boolean).join(' ');
+            return `<tr>
+                <td><strong>${this.escapeHtml(item.nombre || '—')}</strong>${detalle ? `<div style="font-size:0.82rem;color:var(--text-secondary);">${this.escapeHtml(detalle)}</div>` : ''}</td>
+                <td>${this.escapeHtml(item.tipo || '—')}</td>
+                <td>${this.escapeHtml(item.serie || '—')}</td>
+                <td>${this.escapeHtml(item.ubicacion || '—')}</td>
+                <td>${this.escapeHtml(item.asignadoA || '—')}</td>
+                <td><span class="status-badge ${this.inventarioEstadoClass(item.estado)}">${this.escapeHtml(item.estado || '—')}</span></td>
+                <td>
+                    <div style="display:flex;gap:6px;">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="App.showInventarioForm('${id}')" title="Editar"><i class="fas fa-edit"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.deleteInventario('${id}')" title="Eliminar"><i class="fas fa-trash"></i></button>
+                    </div>
+                </td>
+            </tr>`;
+        }).join('');
+
+        host.innerHTML = `<div class="table-container"><table class="data-table">
+            <thead><tr>
+                <th>Equipo</th><th>Tipo</th><th>Serie</th><th>Ubicación</th><th>Asignado a</th><th>Estado</th><th>Acciones</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>`;
+    }
+
+    static showInventarioForm(id) {
+        const item = id ? (this._inventarioItems || []).find((i) => i.id === id) : null;
+        if (id && !item) {
+            Toast.error('Inventario', 'No se encontró el equipo');
+            return;
+        }
+        const current = item || { tipo: 'Computadora', estado: 'En uso' };
+        const options = (list, selected) => list.map((value) =>
+            `<option value="${this.escapeHtml(value)}"${value === selected ? ' selected' : ''}>${this.escapeHtml(value)}</option>`
+        ).join('');
+        const field = (label, inputId, value, placeholder) => `
+            <div class="form-group">
+                <label>${label}</label>
+                <input type="text" class="form-control" id="${inputId}" value="${this.escapeHtml(value || '')}" placeholder="${placeholder || ''}">
+            </div>`;
+        this.showModal(item ? 'Editar equipo' : 'Nuevo equipo', `
+            <form onsubmit="App.saveInventario(event, '${id ? this.escapeJsString(id) : ''}')">
+                <div class="form-group">
+                    <label>Nombre <span class="required">*</span></label>
+                    <input type="text" class="form-control" id="invNombre" required maxlength="120" value="${this.escapeHtml(current.nombre || '')}" placeholder="Ej: Laptop recepción">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    <div class="form-group">
+                        <label>Tipo</label>
+                        <select class="form-control" id="invTipo">${options(InventarioManager.TIPOS, current.tipo)}</select>
+                    </div>
+                    <div class="form-group">
+                        <label>Estado</label>
+                        <select class="form-control" id="invEstado">${options(InventarioManager.ESTADOS, current.estado)}</select>
+                    </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    ${field('Marca', 'invMarca', current.marca, 'Ej: Dell')}
+                    ${field('Modelo', 'invModelo', current.modelo, 'Ej: Latitude 5420')}
+                </div>
+                ${field('Número de serie', 'invSerie', current.serie, 'Serie del fabricante')}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    ${field('Ubicación', 'invUbicacion', current.ubicacion, 'Ej: Recepción')}
+                    ${field('Asignado a', 'invAsignado', current.asignadoA, 'Persona o área')}
+                </div>
+                <div class="form-group">
+                    <label>Observaciones</label>
+                    <textarea class="form-control" id="invNotas" rows="3" maxlength="500">${this.escapeHtml(current.observaciones || '')}</textarea>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:8px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Guardar</button>
+                </div>
+            </form>
+        `, true);
+    }
+
+    static async saveInventario(event, id) {
+        event.preventDefault();
+        const data = {
+            nombre: document.getElementById('invNombre').value,
+            tipo: document.getElementById('invTipo').value,
+            estado: document.getElementById('invEstado').value,
+            marca: document.getElementById('invMarca').value,
+            modelo: document.getElementById('invModelo').value,
+            serie: document.getElementById('invSerie').value,
+            ubicacion: document.getElementById('invUbicacion').value,
+            asignadoA: document.getElementById('invAsignado').value,
+            observaciones: document.getElementById('invNotas').value
+        };
+        try {
+            if (id) await InventarioManager.update(id, data);
+            else await InventarioManager.create(data);
+            this.closeModal();
+            Toast.success('Inventario', id ? 'Equipo actualizado' : 'Equipo registrado');
+            await this.renderInventario();
+        } catch (error) {
+            Toast.error('Inventario', error.message || 'No se pudo guardar');
+        }
+    }
+
+    static async deleteInventario(id) {
+        const item = (this._inventarioItems || []).find((i) => i.id === id);
+        const nombre = item?.nombre || 'este equipo';
+        if (!confirm(`¿Eliminar ${nombre} del inventario?`)) return;
+        try {
+            await InventarioManager.remove(id);
+            Toast.success('Inventario', 'Equipo eliminado');
+            await this.renderInventario();
+        } catch (error) {
+            Toast.error('Inventario', error.message || 'No se pudo eliminar');
         }
     }
 

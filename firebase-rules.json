@@ -873,6 +873,53 @@
       }
     },
 
+    "inventario": {
+      ".read": "auth != null && (root.child('users').child(auth.uid).child('rol').val() === 'admin' || root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)",
+      "$id": {
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('rol').val() === 'admin' || root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)",
+        ".validate": "!newData.exists() || newData.hasChildren(['nombre', 'tipo', 'estado', 'creadoPor', 'fechaCreacion'])",
+        "nombre": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 120"
+        },
+        "tipo": {
+          ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 40"
+        },
+        "marca": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 80)"
+        },
+        "modelo": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 80)"
+        },
+        "serie": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 80)"
+        },
+        "ubicacion": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 120)"
+        },
+        "asignadoA": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 120)"
+        },
+        "estado": {
+          ".validate": "newData.isString() && (newData.val() === 'En uso' || newData.val() === 'En bodega' || newData.val() === 'En reparación' || newData.val() === 'Dado de baja')"
+        },
+        "observaciones": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 500)"
+        },
+        "creadoPor": {
+          ".validate": "newData.isString() && newData.val().length > 0 && (!data.exists() ? newData.val() === auth.uid : newData.val() === data.val())"
+        },
+        "creadoPorNombre": {
+          ".validate": "!newData.exists() || (newData.isString() && newData.val().length <= 200)"
+        },
+        "fechaCreacion": {
+          ".validate": "newData.isString() && (!data.exists() || newData.val() === data.val())"
+        },
+        "fechaActualizacion": {
+          ".validate": "newData.isString()"
+        }
+      }
+    },
+
     "emailDeliveryLog": {
       ".read": "auth != null && root.child('users').child(auth.uid).child('rol').val() === 'admin'",
       ".write": false

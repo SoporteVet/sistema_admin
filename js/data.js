@@ -945,6 +945,20 @@ function timeAgo(dateStr) {
     return formatDate(dateStr);
 }
 
+/**
+ * El inventario lo ven administración y quien pertenece a Tecnologías de Información (TI-500),
+ * ya sea por su departamento principal o como encargado de esa área.
+ */
+function usuarioVeInventario(user) {
+    if (!user) return false;
+    if (user.rol === 'admin') return true;
+    const ti = (typeof SANCTION_FOLLOWUP_DEPT !== 'undefined' && SANCTION_FOLLOWUP_DEPT.TI) || 'TI-500';
+    if (user.departamento === ti) return true;
+    const raw = user.departamentosEncargado;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw) && raw[ti]) return true;
+    return false;
+}
+
 // Convierte un snapshot de Firebase a un array de objetos
 function snapshotToArray(snapshot) {
     const arr = [];
