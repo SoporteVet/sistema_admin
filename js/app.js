@@ -295,16 +295,21 @@ class App {
         document.getElementById('sidebarUserRole').textContent = ROLES[user.rol]?.nombre || user.rol;
 
         document.querySelectorAll('.nav-item[data-role]').forEach(item => {
-            if (item.id === 'navSeguimientoCompartidos') return;
+            if (item.id === 'navSeguimientoCompartidos' || item.id === 'navInventario') return;
             const roles = item.dataset.role.split(',');
             const show = roles.includes(user.rol) || roles.includes('all') || user.rol === 'admin';
             item.style.display = show ? 'flex' : 'none';
         });
-        const sectionInv = document.getElementById('navSectionInventario');
-        if (sectionInv) {
-            sectionInv.style.display = (typeof usuarioVeInventario === 'function' && usuarioVeInventario(user)) ? '' : 'none';
-        }
+        this.syncInventarioNav(user);
         this.refreshSanctionSharedNavItem();
+    }
+
+    static syncInventarioNav(user) {
+        const permitido = typeof usuarioVeInventario === 'function' && usuarioVeInventario(user);
+        const section = document.getElementById('navSectionInventario');
+        const item = document.getElementById('navInventario');
+        if (section) section.style.display = permitido ? 'block' : 'none';
+        if (item) item.style.display = permitido ? 'flex' : 'none';
     }
 
     static async refreshSanctionSharedNavItem() {
