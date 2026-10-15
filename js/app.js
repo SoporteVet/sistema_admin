@@ -5901,8 +5901,18 @@ ${texto}</pre>
         }
         try {
             this._inventarioQuery = '';
+            let importados = 0;
+            try {
+                importados = await InventarioManager.importarSemillaSeptiembre();
+            } catch (importError) {
+                console.error('No se importó la planilla de septiembre:', importError);
+                Toast.error('Inventario', 'No se pudo guardar la planilla de septiembre en la base de datos');
+            }
             this._inventarioItems = await InventarioManager.getAll();
             this.paintInventario();
+            if (importados) {
+                Toast.success('Inventario', `Se agregaron ${importados} equipos del inventario de septiembre 2026`);
+            }
         } catch (error) {
             console.error('Error cargando inventario:', error);
             const permiso = /permission_denied|PERMISSION_DENIED/i.test(`${error.code || ''} ${error.message || ''}`);
@@ -5936,7 +5946,7 @@ ${texto}</pre>
                 </div>
                 <div class="card-body" style="padding-bottom:0;">
                     <div class="form-group">
-                        <input type="search" class="form-control" id="inventarioBusqueda" placeholder="Buscar por nombre, serie, ubicación o responsable" value="${this.escapeHtml(this._inventarioQuery || '')}" oninput="App.filterInventario(this.value)">
+                        <input type="search" class="form-control" id="inventarioBusqueda" placeholder="Buscar por código, nombre, serie, departamento o ubicación" value="${this.escapeHtml(this._inventarioQuery || '')}" oninput="App.filterInventario(this.value)">
                     </div>
                 </div>
                 <div class="card-body no-padding" id="inventarioResultados"></div>
@@ -5953,7 +5963,7 @@ ${texto}</pre>
         if (conteo) conteo.textContent = `(${all.length})`;
         const items = query
             ? all.filter((item) => {
-                const blob = [item.nombre, item.tipo, item.marca, item.modelo, item.serie, item.configuracion, item.color, item.accesorio, item.ubicacion, item.departamentoReceptor, item.asignadoA, item.estado, item.observaciones]
+                const blob = [item.codigo, item.nombre, item.tipo, item.marca, item.modelo, item.serie, item.configuracion, item.color, item.accesorio, item.ubicacion, item.departamentoReceptor, item.asignadoA, item.estado, item.cantidad, item.observaciones]
                     .map((v) => String(v || '').toLowerCase())
                     .join(' ');
                 return blob.includes(query);
@@ -5974,11 +5984,12 @@ ${texto}</pre>
             const id = this.escapeJsString(item.id);
             const detalle = [item.marca, item.modelo].filter(Boolean).join(' ');
             return `<tr>
+                <td>${this.escapeHtml(item.codigo || '—')}</td>
                 <td><strong>${this.escapeHtml(item.nombre || '—')}</strong>${detalle ? `<div style="font-size:0.82rem;color:var(--text-secondary);">${this.escapeHtml(detalle)}</div>` : ''}</td>
                 <td>${this.escapeHtml(item.tipo || '—')}</td>
                 <td>${this.escapeHtml(item.serie || '—')}</td>
+                <td>${this.escapeHtml(item.departamentoReceptor || '—')}</td>
                 <td>${this.escapeHtml(item.ubicacion || '—')}</td>
-                <td>${this.escapeHtml(item.asignadoA || '—')}</td>
                 <td><span class="status-badge ${this.inventarioEstadoClass(item.estado)}">${this.escapeHtml(item.estado || '—')}</span></td>
                 <td>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -5993,7 +6004,7 @@ ${texto}</pre>
 
         host.innerHTML = `<div class="table-container"><table class="data-table">
             <thead><tr>
-                <th>Equipo</th><th>Tipo</th><th>Serie</th><th>Ubicación</th><th>Asignado a</th><th>Estado</th><th>Acciones</th>
+                <th>Código</th><th>Equipo</th><th>Tipo</th><th>Serie</th><th>Departamento</th><th>Ubicación</th><th>Estado</th><th>Acciones</th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table></div>`;
@@ -6014,8 +6025,12 @@ ${texto}</pre>
                 <label>${label}</label>
                 <input type="text" class="form-control" id="${inputId}" value="${this.escapeHtml(value || '')}" placeholder="${placeholder || ''}">
             </div>`;
+        const codigoNota = current.codigo
+            ? `<p style="margin:0 0 12px;font-size:0.85rem;color:var(--text-secondary);">Código: <strong>${this.escapeHtml(current.codigo)}</strong></p>`
+            : '';
         this.showModal(item ? 'Editar equipo' : 'Nuevo equipo', `
             <form onsubmit="App.saveInventario(event, '${id ? this.escapeJsString(id) : ''}')">
+                ${codigoNota}
                 <div class="form-group">
                     <label>Nombre <span class="required">*</span></label>
                     <input type="text" class="form-control" id="invNombre" required maxlength="120" value="${this.escapeHtml(current.nombre || '')}" placeholder="Ej: Laptop recepción">

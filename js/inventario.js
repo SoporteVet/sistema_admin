@@ -50,8 +50,43 @@ class InventarioManager {
             delete item.cartaPdf;
             return { ...item, tieneCarta };
         }).sort((a, b) =>
-            String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es', { sensitivity: 'base' })
+            String(a.codigo || a.nombre || '').localeCompare(String(b.codigo || b.nombre || ''), 'es', { numeric: true, sensitivity: 'base' })
         );
+    }
+
+    static async importarSemillaSeptiembre() {
+        const lista = (typeof INVENTARIO_SEPTIEMBRE_2026 !== 'undefined' && Array.isArray(INVENTARIO_SEPTIEMBRE_2026))
+            ? INVENTARIO_SEPTIEMBRE_2026
+            : [];
+        if (!lista.length) return 0;
+        const user = this._assertAccess();
+        const snapshot = await dbRef.inventario.once('value');
+        const existing = snapshot.val() || {};
+        const presentes = new Set(Object.keys(existing));
+        Object.values(existing).forEach((item) => {
+            if (item && item.codigo) presentes.add(String(item.codigo));
+        });
+        const faltan = lista.filter((item) => item && item.codigo && !presentes.has(String(item.codigo)));
+        if (!faltan.length) return 0;
+        const now = new Date().toISOString();
+        const creador = `${user.nombre || ''} ${user.apellido || ''}`.trim();
+        const chunkSize = 20;
+        for (let i = 0; i < faltan.length; i += chunkSize) {
+            const slice = faltan.slice(i, i + chunkSize);
+            await Promise.all(slice.map((item) => {
+                const codigo = this._clip(item.codigo, 40);
+                const payload = {
+                    ...this._clean(item),
+                    codigo,
+                    creadoPor: user.id,
+                    creadoPorNombre: creador,
+                    fechaCreacion: now,
+                    fechaActualizacion: now
+                };
+                return dbRef.inventario.child(codigo).set(payload);
+            }));
+        }
+        return faltan.length;
     }
 
     static async getCartaPdf(id) {
