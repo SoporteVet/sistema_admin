@@ -5981,8 +5981,9 @@ ${texto}</pre>
                 <td>${this.escapeHtml(item.asignadoA || '—')}</td>
                 <td><span class="status-badge ${this.inventarioEstadoClass(item.estado)}">${this.escapeHtml(item.estado || '—')}</span></td>
                 <td>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <button type="button" class="btn btn-sm btn-outline" onclick="App.descargarCartaEntrega('${id}')"><i class="fas fa-file-signature"></i> Carta de entrega</button>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="App.showCartaEntrega('${id}')"><i class="fas fa-file-signature"></i> ${item.tieneCarta ? 'Firmar de nuevo' : 'Carta de entrega'}</button>
+                        ${item.tieneCarta ? `<button type="button" class="btn btn-sm btn-outline" onclick="App.descargarCartaFirmada('${id}')"><i class="fas fa-file-pdf"></i> PDF firmado</button>` : ''}
                         <button type="button" class="btn btn-sm btn-outline" onclick="App.showInventarioForm('${id}')" title="Editar"><i class="fas fa-edit"></i></button>
                         <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.deleteInventario('${id}')" title="Eliminar"><i class="fas fa-trash"></i></button>
                     </div>
@@ -6092,18 +6093,168 @@ ${texto}</pre>
         }
     }
 
-    static async descargarCartaEntrega(id) {
+    static _cartaPads = {};
+
+    static showCartaEntrega(id) {
         const item = (this._inventarioItems || []).find((i) => i.id === id);
         if (!item) {
             Toast.error('Inventario', 'No se encontró el equipo');
             return;
         }
         const user = AuthManager.getUser();
-        const entregadoPor = user ? `${user.nombre || ''} ${user.apellido || ''}`.trim() : '';
+        const entregadoPor = item.cartaEntregadoPor || (user ? `${user.nombre || ''} ${user.apellido || ''}`.trim() : '');
+        const recibidoPor = item.cartaRecibidoPor || item.asignadoA || '';
+        const idJs = this.escapeJsString(id);
+        const aviso = item.tieneCarta
+            ? '<p style="margin:0 0 14px;font-size:0.85rem;color:var(--text-secondary);">Ya hay un PDF firmado guardado. Si firman de nuevo, ese archivo se reemplaza.</p>'
+            : '<p style="margin:0 0 14px;font-size:0.85rem;color:var(--text-secondary);">Las dos personas firman en pantalla. El PDF queda guardado en el equipo y también se descarga.</p>';
+        this._cartaPads = {};
+        this.showModal('Carta de entrega', `
+            <form onsubmit="App.confirmarCartaEntrega(event, '${idJs}')">
+                ${aviso}
+                <style>@media (max-width: 760px) { #cartaFirmasGrid { grid-template-columns: 1fr !important; } }</style>
+                <div id="cartaFirmasGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                    <div>
+                        <div class="form-group">
+                            <label>Entregado por (TI)</label>
+                            <input type="text" class="form-control" id="cartaEntregaNombre" maxlength="120" required value="${this.escapeHtml(entregadoPor)}">
+                        </div>
+                        <label style="display:block;font-size:0.82rem;margin-bottom:6px;">Firma de quien entrega</label>
+                        <canvas id="cartaPadEntrega" width="460" height="140" style="width:100%;height:140px;display:block;border:2px dashed #1565c0;border-radius:8px;background:#fff;touch-action:none;cursor:crosshair;"></canvas>
+                        <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.limpiarFirmaCarta('cartaPadEntrega')"><i class="fas fa-eraser"></i> Limpiar</button>
+                    </div>
+                    <div>
+                        <div class="form-group">
+                            <label>Recibido por</label>
+                            <input type="text" class="form-control" id="cartaRecibeNombre" maxlength="120" required value="${this.escapeHtml(recibidoPor)}">
+                        </div>
+                        <label style="display:block;font-size:0.82rem;margin-bottom:6px;">Firma de quien recibe</label>
+                        <canvas id="cartaPadRecibe" width="460" height="140" style="width:100%;height:140px;display:block;border:2px dashed #1565c0;border-radius:8px;background:#fff;touch-action:none;cursor:crosshair;"></canvas>
+                        <button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="App.limpiarFirmaCarta('cartaPadRecibe')"><i class="fas fa-eraser"></i> Limpiar</button>
+                    </div>
+                </div>
+                <div style="display:flex;justify-content:flex-end;gap:12px;margin-top:18px;">
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary" id="btnGuardarCarta"><i class="fas fa-file-signature"></i> Firmar y guardar</button>
+                </div>
+            </form>
+        `, true);
+        this._initCartaPad('cartaPadEntrega');
+        this._initCartaPad('cartaPadRecibe');
+    }
+
+    static _initCartaPad(canvasId) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.strokeStyle = '#111111';
+        ctx.lineWidth = 2.4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        const pad = { canvas, ctx };
+        this._cartaPads[canvasId] = pad;
+        const point = (event) => {
+            const rect = canvas.getBoundingClientRect();
+            return {
+                x: (event.clientX - rect.left) * (canvas.width / rect.width),
+                y: (event.clientY - rect.top) * (canvas.height / rect.height)
+            };
+        };
+        canvas.addEventListener('pointerdown', (event) => {
+            event.preventDefault();
+            try { canvas.setPointerCapture(event.pointerId); } catch (e) { /* el trazo sigue con pointermove */ }
+            pad.drawing = true;
+            const p = point(event);
+            ctx.beginPath();
+            ctx.moveTo(p.x, p.y);
+        });
+        canvas.addEventListener('pointermove', (event) => {
+            if (!pad.drawing) return;
+            event.preventDefault();
+            const p = point(event);
+            ctx.lineTo(p.x, p.y);
+            ctx.stroke();
+        });
+        const stop = () => { pad.drawing = false; };
+        canvas.addEventListener('pointerup', stop);
+        canvas.addEventListener('pointercancel', stop);
+    }
+
+    static limpiarFirmaCarta(canvasId) {
+        const pad = this._cartaPads[canvasId];
+        if (!pad) return;
+        pad.ctx.clearRect(0, 0, pad.canvas.width, pad.canvas.height);
+        pad.drawing = false;
+    }
+
+    static _cartaPadTieneTinta(canvasId) {
+        const pad = this._cartaPads[canvasId];
+        if (!pad) return false;
+        const data = pad.ctx.getImageData(0, 0, pad.canvas.width, pad.canvas.height).data;
+        for (let i = 3; i < data.length; i += 16) {
+            if (data[i] > 10) return true;
+        }
+        return false;
+    }
+
+    static async confirmarCartaEntrega(event, id) {
+        event.preventDefault();
+        const item = (this._inventarioItems || []).find((i) => i.id === id);
+        if (!item) {
+            Toast.error('Inventario', 'No se encontró el equipo');
+            return;
+        }
+        const entregadoPor = document.getElementById('cartaEntregaNombre').value.trim();
+        const recibidoPor = document.getElementById('cartaRecibeNombre').value.trim();
+        if (!entregadoPor || !recibidoPor) {
+            Toast.error('Inventario', 'Escriba el nombre de quien entrega y de quien recibe');
+            return;
+        }
+        if (!this._cartaPadTieneTinta('cartaPadEntrega') || !this._cartaPadTieneTinta('cartaPadRecibe')) {
+            Toast.error('Inventario', 'Las dos personas deben firmar en su recuadro');
+            return;
+        }
+        const btn = document.getElementById('btnGuardarCarta');
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Guardando...';
+        }
         try {
-            await InventarioManager.descargarCartaEntrega(item, entregadoPor);
+            const firmaEntrega = this._cartaPads.cartaPadEntrega.canvas.toDataURL('image/png');
+            const firmaRecibe = this._cartaPads.cartaPadRecibe.canvas.toDataURL('image/png');
+            const base64 = await InventarioManager.construirPdfCarta(item, {
+                entregadoPor,
+                recibidoPor,
+                firmaEntrega,
+                firmaRecibe
+            });
+            const fecha = new Date().toISOString();
+            await InventarioManager.guardarCarta(id, base64, { fecha, entregadoPor, recibidoPor });
+            InventarioManager.descargarPdfBase64(base64, InventarioManager.nombreArchivoCarta(item));
+            this._cartaPads = {};
+            this.closeModal();
+            Toast.success('Inventario', 'Carta firmada y guardada');
+            await this.renderInventario();
         } catch (error) {
-            Toast.error('Inventario', error.message || 'No se pudo generar la carta');
+            if (btn) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-file-signature"></i> Firmar y guardar';
+            }
+            Toast.error('Inventario', error.message || 'No se pudo guardar la carta');
+        }
+    }
+
+    static async descargarCartaFirmada(id) {
+        const item = (this._inventarioItems || []).find((i) => i.id === id);
+        if (!item) {
+            Toast.error('Inventario', 'No se encontró el equipo');
+            return;
+        }
+        try {
+            const base64 = await InventarioManager.getCartaPdf(id);
+            InventarioManager.descargarPdfBase64(base64, InventarioManager.nombreArchivoCarta(item));
+        } catch (error) {
+            Toast.error('Inventario', error.message || 'No se pudo descargar la carta');
         }
     }
 
