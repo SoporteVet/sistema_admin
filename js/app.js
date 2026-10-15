@@ -5953,7 +5953,7 @@ ${texto}</pre>
         if (conteo) conteo.textContent = `(${all.length})`;
         const items = query
             ? all.filter((item) => {
-                const blob = [item.nombre, item.tipo, item.marca, item.modelo, item.serie, item.ubicacion, item.asignadoA, item.estado, item.observaciones]
+                const blob = [item.nombre, item.tipo, item.marca, item.modelo, item.serie, item.configuracion, item.color, item.accesorio, item.ubicacion, item.departamentoReceptor, item.asignadoA, item.estado, item.observaciones]
                     .map((v) => String(v || '').toLowerCase())
                     .join(' ');
                 return blob.includes(query);
@@ -5981,7 +5981,8 @@ ${texto}</pre>
                 <td>${this.escapeHtml(item.asignadoA || '—')}</td>
                 <td><span class="status-badge ${this.inventarioEstadoClass(item.estado)}">${this.escapeHtml(item.estado || '—')}</span></td>
                 <td>
-                    <div style="display:flex;gap:6px;">
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-sm btn-outline" onclick="App.descargarCartaEntrega('${id}')"><i class="fas fa-file-signature"></i> Carta de entrega</button>
                         <button type="button" class="btn btn-sm btn-outline" onclick="App.showInventarioForm('${id}')" title="Editar"><i class="fas fa-edit"></i></button>
                         <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.deleteInventario('${id}')" title="Eliminar"><i class="fas fa-trash"></i></button>
                     </div>
@@ -6034,8 +6035,20 @@ ${texto}</pre>
                 </div>
                 ${field('Número de serie', 'invSerie', current.serie, 'Serie del fabricante')}
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    ${field('Configuración', 'invConfig', current.configuracion, 'Ej: 4G + 128 GB')}
+                    ${field('Color', 'invColor', current.color, 'Ej: Luna Grey')}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    ${field('Accesorio incluido', 'invAccesorio', current.accesorio, 'Ej: Folio Case')}
+                    ${field('Fecha de la etiqueta', 'invFechaEtiqueta', current.fechaEtiqueta, 'Ej: 06/02/2026')}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                    ${field('Cantidad', 'invCantidad', current.cantidad || '1 unidad', 'Ej: 1 unidad')}
+                    ${field('Departamento que recibe', 'invDeptoRecibe', current.departamentoReceptor, 'Ej: Internos')}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
                     ${field('Ubicación', 'invUbicacion', current.ubicacion, 'Ej: Recepción')}
-                    ${field('Asignado a', 'invAsignado', current.asignadoA, 'Persona o área')}
+                    ${field('Asignado a', 'invAsignado', current.asignadoA, 'Persona que recibe')}
                 </div>
                 <div class="form-group">
                     <label>Observaciones</label>
@@ -6058,6 +6071,12 @@ ${texto}</pre>
             marca: document.getElementById('invMarca').value,
             modelo: document.getElementById('invModelo').value,
             serie: document.getElementById('invSerie').value,
+            configuracion: document.getElementById('invConfig').value,
+            color: document.getElementById('invColor').value,
+            accesorio: document.getElementById('invAccesorio').value,
+            fechaEtiqueta: document.getElementById('invFechaEtiqueta').value,
+            cantidad: document.getElementById('invCantidad').value,
+            departamentoReceptor: document.getElementById('invDeptoRecibe').value,
             ubicacion: document.getElementById('invUbicacion').value,
             asignadoA: document.getElementById('invAsignado').value,
             observaciones: document.getElementById('invNotas').value
@@ -6070,6 +6089,21 @@ ${texto}</pre>
             await this.renderInventario();
         } catch (error) {
             Toast.error('Inventario', error.message || 'No se pudo guardar');
+        }
+    }
+
+    static async descargarCartaEntrega(id) {
+        const item = (this._inventarioItems || []).find((i) => i.id === id);
+        if (!item) {
+            Toast.error('Inventario', 'No se encontró el equipo');
+            return;
+        }
+        const user = AuthManager.getUser();
+        const entregadoPor = user ? `${user.nombre || ''} ${user.apellido || ''}`.trim() : '';
+        try {
+            await InventarioManager.descargarCartaEntrega(item, entregadoPor);
+        } catch (error) {
+            Toast.error('Inventario', error.message || 'No se pudo generar la carta');
         }
     }
 
