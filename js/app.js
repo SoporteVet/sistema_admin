@@ -48,6 +48,9 @@ class App {
     static init() {
         // Mostrar pantalla de carga mientras Firebase verifica el auth
         this.showLoading(true);
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) this.closeSidebar();
+        });
 
         AuthManager.initAuthListener(async (isAuthenticated) => {
             this.showLoading(false);
@@ -189,8 +192,7 @@ class App {
         this.updateActiveNav(view);
         this.updatePageTitle(view);
 
-        // Close sidebar on mobile
-        document.querySelector('.sidebar')?.classList.remove('open');
+        this.closeSidebar();
 
         // Show loading then render
         this.showContentLoading();
@@ -336,7 +338,17 @@ class App {
     }
 
     static toggleSidebar() {
-        document.querySelector('.sidebar').classList.toggle('open');
+        const sidebar = document.querySelector('.sidebar');
+        if (!sidebar) return;
+        const open = sidebar.classList.toggle('open');
+        document.getElementById('sidebarBackdrop')?.classList.toggle('open', open);
+        document.body.classList.toggle('sidebar-open', open);
+    }
+
+    static closeSidebar() {
+        document.querySelector('.sidebar')?.classList.remove('open');
+        document.getElementById('sidebarBackdrop')?.classList.remove('open');
+        document.body.classList.remove('sidebar-open');
     }
 
     // ========================================================
