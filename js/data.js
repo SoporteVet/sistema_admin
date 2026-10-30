@@ -277,6 +277,28 @@ const DEPARTAMENTOS = {
                 }
             }
         }
+    },
+    'CE-700': {
+        nombre: 'Consulta externa',
+        codigo: 'CE-700',
+        color: '#00695c',
+        icono: 'fas fa-stethoscope',
+        categorias: {
+            '1': {
+                nombre: 'Comunicaciones Oficiales',
+                subcategorias: {
+                    '1.1': 'Comunicación oficial interna',
+                    '1.2': 'Comunicación oficial externa'
+                }
+            },
+            '2': {
+                nombre: 'Memorandos',
+                subcategorias: {
+                    '2.1': 'Memorando interno',
+                    '2.2': 'Memorando externo'
+                }
+            }
+        }
     }
 };
 
@@ -959,6 +981,16 @@ function usuarioVeInventario(user) {
     if (user.rol !== 'encargado') return false;
     const raw = user.departamentosEncargado;
     return !!(raw && typeof raw === 'object' && !Array.isArray(raw) && raw[ti] === true);
+}
+
+/** Interfaz local: ocultar Documentación TI sin borrar datos. */
+const DOCUMENTACION_TI_UI_HABILITADA = true;
+
+function usuarioVeDocumentacionTi(user) {
+    if (typeof DOCUMENTACION_TI_UI_HABILITADA !== 'undefined' && DOCUMENTACION_TI_UI_HABILITADA === false) return false;
+    if (!user || user.activo === false) return false;
+    if (typeof DocumentacionTiPermiso !== 'undefined') return DocumentacionTiPermiso.puedeLeer(user);
+    return usuarioVeInventario(user);
 }
 
 // Convierte un snapshot de Firebase a un array de objetos

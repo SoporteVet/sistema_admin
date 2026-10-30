@@ -6,10 +6,25 @@
       "$uid": {
         ".read": "auth != null && root.child('users').child(auth.uid).exists()",
         ".write": "auth != null && (
-          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
-          ($uid === auth.uid && !data.exists()) ||
-          ($uid === auth.uid && data.exists() && !newData.hasChild('rol') && !newData.hasChild('departamento')) ||
-          (!data.exists() && !root.child('users').hasChildren())
+          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin' && root.child('users').child(auth.uid).child('activo').val() === true) ||
+          (
+            $uid === auth.uid &&
+            data.exists() &&
+            newData.exists() &&
+            newData.child('rol').val() === data.child('rol').val() &&
+            newData.child('departamento').val() === data.child('departamento').val() &&
+            newData.child('activo').val() === data.child('activo').val() &&
+            newData.child('departamentosEncargado').val() === data.child('departamentosEncargado').val()
+          ) ||
+          (
+            $uid === auth.uid &&
+            !data.exists() &&
+            newData.exists() &&
+            root.child('provisionamiento').child('inicialCompletado').val() !== true &&
+            !root.child('users').hasChildren() &&
+            newData.child('rol').val() === 'admin' &&
+            newData.child('activo').val() === true
+          )
         )",
         ".validate": "!newData.exists() || data.exists() || newData.hasChildren(['nombre', 'apellido', 'email', 'rol', 'departamento', 'activo', 'fechaCreacion'])",
         "nombre": {
@@ -153,11 +168,32 @@
       "$notifId": {
         ".read": "auth != null && data.child('destinatario').val() === auth.uid",
         ".write": "auth != null && (
-          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin') ||
+          (root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('rol').val() === 'admin' && root.child('users').child(auth.uid).child('activo').val() === true) ||
           (
+            data.exists() &&
             data.child('destinatario').val() === auth.uid &&
             newData.child('leida').val() === true &&
-            !newData.hasChild('destinatario')
+            newData.child('destinatario').val() === data.child('destinatario').val()
+          ) ||
+          (
+            !data.exists() &&
+            root.child('users').child(auth.uid).exists() &&
+            root.child('users').child(auth.uid).child('activo').val() === true &&
+            (
+              root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+              root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true
+            ) &&
+            (
+              newData.child('referenciaType').val() === 'doc_ti_actividad' ||
+              newData.child('referenciaType').val() === 'doc_ti_articulo' ||
+              newData.child('referenciaType').val() === 'doc_ti_sistema'
+            ) &&
+            (
+              root.child('users').child(newData.child('destinatario').val()).child('rol').val() === 'admin' ||
+              root.child('users').child(newData.child('destinatario').val()).child('departamento').val() === 'TI-500' ||
+              root.child('users').child(newData.child('destinatario').val()).child('departamentosEncargado').child('TI-500').val() === true
+            )
           )
         )",
         ".validate": "newData.hasChildren(['tipo', 'titulo', 'mensaje', 'destinatario', 'fecha', 'leida'])",
@@ -916,6 +952,245 @@
         },
         "fechaActualizacion": {
           ".validate": "newData.isString()"
+        }
+      }
+    },
+
+    "provisionamiento": {
+      "inicialCompletado": {
+        ".read": "auth != null",
+        ".write": "auth != null && (
+          (!data.exists() && newData.val() === true && !root.child('users').hasChildren()) ||
+          (data.val() === true && newData.val() === true && root.child('users').child(auth.uid).child('rol').val() === 'admin')
+        )",
+        ".validate": "newData.isBoolean() && newData.val() === true"
+      }
+    },
+
+    "documentacionTi": {
+      ".read": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && (
+        root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+        root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+        root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true
+      )",
+      ".write": false,
+      "config": {
+        ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && (
+          root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+          (
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+            (
+              root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+              root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true
+            )
+          )
+        )",
+        ".validate": "!newData.exists() || (
+          newData.hasChild('schemaVersion') &&
+          newData.child('schemaVersion').isNumber() &&
+          (!newData.hasChild('habilitado') || newData.child('habilitado').isBoolean())
+        )"
+      },
+      "actividadesMeta": {
+        ".indexOn": ["fechaEjecucionMs", "estado", "tipo", "responsableId", "sistemaId", "equipoId", "actualizadoMs"],
+        "$id": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+            root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true
+          ) && (
+            (
+              !data.exists() &&
+              newData.child('creadoPor').val() === auth.uid &&
+              newData.child('revision').val() === 1
+            ) ||
+            (
+              data.exists() &&
+              newData.exists() &&
+              newData.child('creadoPor').val() === data.child('creadoPor').val() &&
+              newData.child('revision').val() === data.child('revision').val() + 1 &&
+              (
+                root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+                root.child('users').child(auth.uid).child('rol').val() === 'encargado' ||
+                data.child('creadoPor').val() === auth.uid ||
+                data.child('responsableId').val() === auth.uid
+              )
+            )
+          )",
+          ".validate": "!newData.exists() || (
+            newData.hasChildren(['titulo', 'tipo', 'estado', 'creadoPor', 'revision', 'schemaVersion', 'fechaEjecucion']) &&
+            newData.child('titulo').isString() && newData.child('titulo').val().length > 0 && newData.child('titulo').val().length <= 200 &&
+            newData.child('tipo').isString() &&
+            (newData.child('estado').val() === 'pendiente' || newData.child('estado').val() === 'en_progreso' || newData.child('estado').val() === 'completada' || newData.child('estado').val() === 'cancelada') &&
+            (newData.child('estado').val() !== 'completada' || (newData.hasChild('resultadoResumen') && newData.child('resultadoResumen').isString() && newData.child('resultadoResumen').val().length >= 8)) &&
+            (newData.child('estado').val() !== 'cancelada' || (newData.hasChild('motivoCancelacion') && newData.child('motivoCancelacion').isString() && newData.child('motivoCancelacion').val().length >= 4))
+          )"
+        }
+      },
+      "actividadesCuerpo": {
+        "$id": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && root.child('documentacionTi').child('actividadesMeta').child($id).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('rol').val() === 'encargado' && (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true) ||
+            root.child('documentacionTi').child('actividadesMeta').child($id).child('creadoPor').val() === auth.uid ||
+            root.child('documentacionTi').child('actividadesMeta').child($id).child('responsableId').val() === auth.uid
+          )",
+          ".validate": "!newData.exists() || (newData.child('descripcion').isString() && newData.child('descripcion').val().length <= 20000)"
+        }
+      },
+      "actividadesSeguimiento": {
+        "$id": {
+          "$eid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && !data.exists() && newData.exists() && newData.child('autorId').val() === auth.uid && root.child('documentacionTi').child('actividadesMeta').child($id).exists()",
+            ".validate": "newData.hasChildren(['texto', 'autorId']) && newData.child('texto').isString() && newData.child('texto').val().length > 0 && newData.child('texto').val().length <= 4000"
+          }
+        }
+      },
+      "actividadesHistorial": {
+        "$id": {
+          "$eid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && !data.exists() && newData.exists() && newData.child('por').val() === auth.uid",
+            ".validate": "newData.hasChild('tipo')"
+          }
+        }
+      },
+      "actividadesAdjuntosMeta": {
+        "$id": {
+          "$fid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && root.child('documentacionTi').child('actividadesMeta').child($id).exists() && (!data.exists() || !newData.exists())",
+            ".validate": "!newData.exists() || (
+              newData.hasChildren(['nombreArchivo', 'mimeType', 'tamanoBytes', 'subidoPor']) &&
+              newData.child('tamanoBytes').isNumber() && newData.child('tamanoBytes').val() > 0 && newData.child('tamanoBytes').val() <= 1048576 &&
+              (newData.child('mimeType').val() === 'application/pdf' || newData.child('mimeType').val() === 'image/png' || newData.child('mimeType').val() === 'image/jpeg') &&
+              newData.child('subidoPor').val() === auth.uid
+            )"
+          }
+        }
+      },
+      "actividadesAdjuntosFiles": {
+        "$id": {
+          "$fid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && root.child('documentacionTi').child('actividadesAdjuntosMeta').child($id).child($fid).exists() && (!data.exists() || !newData.exists())",
+            ".validate": "!newData.exists() || (
+              newData.hasChildren(['dataBase64', 'mimeType']) &&
+              newData.child('dataBase64').isString() &&
+              newData.child('dataBase64').val().length >= 20 &&
+              newData.child('dataBase64').val().length <= 1400000 &&
+              (
+                (newData.child('mimeType').val() === 'application/pdf' && newData.child('dataBase64').val().matches(/^JVBERi0/)) ||
+                (newData.child('mimeType').val() === 'image/png' && newData.child('dataBase64').val().matches(/^iVBORw0KGgo/)) ||
+                (newData.child('mimeType').val() === 'image/jpeg' && newData.child('dataBase64').val().matches(/^\\/9j\\//))
+              )
+            )"
+          }
+        }
+      },
+      "articulosMeta": {
+        ".indexOn": ["estado", "tipo", "categoria", "responsableId", "sistemaId", "actualizadoMs"],
+        "$id": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' ||
+            root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true
+          ) && (
+            (
+              !data.exists() &&
+              newData.child('creadoPor').val() === auth.uid &&
+              newData.child('estado').val() === 'borrador' &&
+              newData.child('revision').val() === 1
+            ) ||
+            (
+              data.exists() &&
+              newData.exists() &&
+              newData.child('creadoPor').val() === data.child('creadoPor').val() &&
+              (
+                root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+                (
+                  root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+                  (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
+                ) ||
+                (
+                  data.child('creadoPor').val() === auth.uid &&
+                  newData.child('publishedVersionId').val() === data.child('publishedVersionId').val() &&
+                  (newData.child('estado').val() === 'borrador' || newData.child('estado').val() === 'en_revision')
+                )
+              )
+            )
+          )",
+          ".validate": "!newData.exists() || (
+            newData.hasChildren(['titulo', 'tipo', 'estado', 'creadoPor', 'revision', 'schemaVersion']) &&
+            newData.child('titulo').isString() && newData.child('titulo').val().length > 0 && newData.child('titulo').val().length <= 200 &&
+            (newData.child('estado').val() === 'borrador' || newData.child('estado').val() === 'en_revision' || newData.child('estado').val() === 'publicado' || newData.child('estado').val() === 'archivado')
+          )"
+        }
+      },
+      "articulosCuerpo": {
+        "$id": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && root.child('documentacionTi').child('articulosMeta').child($id).exists() && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (root.child('users').child(auth.uid).child('rol').val() === 'encargado' && (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)) ||
+            root.child('documentacionTi').child('articulosMeta').child($id).child('creadoPor').val() === auth.uid
+          )",
+          ".validate": "!newData.exists() || (newData.child('markdown').isString() && newData.child('markdown').val().length <= 50000)"
+        }
+      },
+      "articulosVersiones": {
+        "$id": {
+          "$vid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && !data.exists() && newData.exists() && (
+              root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+              (
+                root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+                (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
+              )
+            )",
+            ".validate": "newData.hasChildren(['markdown', 'autorId', 'numero']) && newData.child('markdown').isString() && newData.child('markdown').val().length <= 50000"
+          }
+        }
+      },
+      "articulosAdjuntosMeta": {
+        "$id": {
+          "$fid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && root.child('documentacionTi').child('articulosMeta').child($id).exists() && (!data.exists() || !newData.exists())",
+            ".validate": "!newData.exists() || (
+              newData.hasChildren(['nombreArchivo', 'mimeType', 'tamanoBytes', 'subidoPor']) &&
+              newData.child('tamanoBytes').isNumber() && newData.child('tamanoBytes').val() <= 1048576 &&
+              (newData.child('mimeType').val() === 'application/pdf' || newData.child('mimeType').val() === 'image/png' || newData.child('mimeType').val() === 'image/jpeg') &&
+              newData.child('subidoPor').val() === auth.uid
+            )"
+          }
+        }
+      },
+      "articulosAdjuntosFiles": {
+        "$id": {
+          "$fid": {
+            ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('documentacionTi').child('articulosAdjuntosMeta').child($id).child($fid).exists() && (!data.exists() || !newData.exists())",
+            ".validate": "!newData.exists() || (
+              newData.child('dataBase64').isString() && newData.child('dataBase64').val().length <= 1400000 &&
+              (
+                (newData.child('mimeType').val() === 'application/pdf' && newData.child('dataBase64').val().matches(/^JVBERi0/)) ||
+                (newData.child('mimeType').val() === 'image/png' && newData.child('dataBase64').val().matches(/^iVBORw0KGgo/)) ||
+                (newData.child('mimeType').val() === 'image/jpeg' && newData.child('dataBase64').val().matches(/^\\/9j\\//))
+              )
+            )"
+          }
+        }
+      },
+      "sistemas": {
+        ".indexOn": ["estado", "nombre"],
+        "$id": {
+          ".write": "auth != null && root.child('users').child(auth.uid).exists() && root.child('users').child(auth.uid).child('activo').val() === true && (
+            root.child('users').child(auth.uid).child('rol').val() === 'admin' ||
+            (
+              root.child('users').child(auth.uid).child('rol').val() === 'encargado' &&
+              (root.child('users').child(auth.uid).child('departamento').val() === 'TI-500' || root.child('users').child(auth.uid).child('departamentosEncargado').child('TI-500').val() === true)
+            )
+          )",
+          ".validate": "!newData.exists() || (
+            newData.hasChildren(['nombre', 'estado', 'schemaVersion', 'creadoPor']) &&
+            newData.child('nombre').isString() && newData.child('nombre').val().length > 0 && newData.child('nombre').val().length <= 120 &&
+            (newData.child('estado').val() === 'activo' || newData.child('estado').val() === 'retirado')
+          )"
         }
       }
     },

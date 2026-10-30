@@ -126,7 +126,11 @@ class NotificationManager {
             'solicitud_nueva': 'fas fa-bell',
             'solicitud_aprobada': 'fas fa-thumbs-up',
             'solicitud_rechazada': 'fas fa-thumbs-down',
-            'general': 'fas fa-info-circle'
+            'general': 'fas fa-info-circle',
+            'doc_ti_asignacion': 'fas fa-user-check',
+            'doc_ti_revision': 'fas fa-book',
+            'doc_ti_publicado': 'fas fa-check-circle',
+            'doc_ti_devuelto': 'fas fa-undo'
         };
         return icons[tipo] || icons['general'];
     }
@@ -138,7 +142,11 @@ class NotificationManager {
             'solicitud_nueva': '#f57f17',
             'solicitud_aprobada': '#2e7d32',
             'solicitud_rechazada': '#c62828',
-            'general': '#546e7a'
+            'general': '#546e7a',
+            'doc_ti_asignacion': '#006064',
+            'doc_ti_revision': '#1565c0',
+            'doc_ti_publicado': '#2e7d32',
+            'doc_ti_devuelto': '#f57f17'
         };
         return colors[tipo] || colors['general'];
     }

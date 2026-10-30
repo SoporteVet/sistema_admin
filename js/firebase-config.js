@@ -54,7 +54,9 @@ const dbRef = {
     evaluacionesByPeriodo: db.ref('evaluacionesByPeriodo'),
     evaluacionesUnique: db.ref('evaluacionesUnique'),
     evaluacionesJefaturasCatalog: db.ref('evaluacionesJefaturasCatalog'),
-    inventario: db.ref('inventario')
+    inventario: db.ref('inventario'),
+    documentacionTi: db.ref('documentacionTi'),
+    provisionamiento: db.ref('provisionamiento')
 };
 
 console.log('🔥 Firebase inicializado correctamente');

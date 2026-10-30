@@ -1973,6 +1973,17 @@ textarea.form-control {
         font-size: 1.15rem;
     }
 
+    .doc-ti-toolbar,
+    .doc-ti-filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .doc-ti-filters .form-control {
+        min-width: 0;
+        width: 100%;
+    }
+
     .modal-overlay {
         padding: 0;
         align-items: flex-end;
@@ -2135,6 +2146,85 @@ textarea.form-control {
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-light);
+}
+
+/* ============================================================
+   DOCUMENTACIÓN TI
+   ============================================================ */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+}
+.doc-ti-shell { display: flex; flex-direction: column; gap: 8px; }
+.doc-ti-work {
+    max-width: 1100px;
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    box-shadow: var(--shadow-sm);
+}
+.doc-ti-work h2 { margin: 12px 0; }
+.doc-ti-toolbar {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+    align-items: flex-start;
+}
+.doc-ti-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.doc-ti-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.doc-ti-filters .form-control { min-width: 140px; }
+.doc-ti-hint { color: var(--text-secondary); font-size: 0.85rem; margin: 8px 0 16px; }
+.doc-ti-warn { background: rgba(245,127,23,0.12); border-left: 4px solid var(--warning); padding: 10px 14px; border-radius: 6px; }
+.doc-ti-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.doc-ti-kpi-n { font-size: 2rem; font-weight: 700; color: var(--primary); }
+.doc-ti-kpi-l { color: var(--text-secondary); }
+.doc-ti-row {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-light);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.doc-ti-row:hover { color: var(--primary); }
+.doc-ti-click { cursor: pointer; }
+.doc-ti-grid, .doc-ti-kpis, .doc-ti-grid2 { display: grid; gap: 12px; }
+.doc-ti-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.doc-ti-grid2 { grid-template-columns: 1fr 1fr; }
+.doc-ti-doc { margin-bottom: 12px; cursor: pointer; }
+.doc-ti-doc-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.doc-ti-meta { color: var(--text-secondary); font-size: 0.85rem; }
+.doc-ti-editor { border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; margin: 12px 0; }
+.doc-ti-mdbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; background: var(--bg-main); border-bottom: 1px solid var(--border); }
+.doc-ti-mdarea {
+    min-height: 420px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    border: none !important;
+    border-radius: 0 !important;
+}
+.doc-ti-md { padding: 16px; line-height: 1.65; }
+.doc-ti-md h1, .doc-ti-md h2, .doc-ti-md h3 { margin: 16px 0 8px; }
+.doc-ti-md code { background: var(--bg-main); padding: 1px 6px; border-radius: 4px; }
+.doc-ti-code { margin: 12px 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.doc-ti-code-bar { display: flex; justify-content: space-between; padding: 6px 10px; background: var(--bg-main); font-size: 0.8rem; }
+.doc-ti-code pre { margin: 0; padding: 12px; overflow: auto; }
+.doc-ti-pre { white-space: pre-wrap; background: var(--bg-main); padding: 12px; border-radius: 8px; }
+.doc-ti-unsaved { color: var(--warning); font-weight: 600; margin: 8px 0; }
+.doc-ti-pager { display: flex; gap: 12px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+.doc-ti-tasks { list-style: none; }
+@media (max-width: 800px) {
+    .doc-ti-kpis, .doc-ti-grid2 { grid-template-columns: 1fr; }
+    .doc-ti-work { padding: 16px; }
+    .doc-ti-mdarea { min-height: 280px; }
 }
 
 /* Print styles */

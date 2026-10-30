@@ -319,7 +319,9 @@
                 };
 
                 await fbDb.ref('users/' + uid).set(profile);
+                await fbDb.ref('provisionamiento/inicialCompletado').set(true);
                 result.innerHTML += '<br><span style="color:#43a047;">✅ Perfil de administrador creado en Base de Datos</span>';
+                result.innerHTML += '<br><span style="color:#43a047;">✅ Aprovisionamiento inicial cerrado (no se puede reabrir desde el cliente)</span>';
 
                 // Initialize counters
                 await fbDb.ref('counters').set({});

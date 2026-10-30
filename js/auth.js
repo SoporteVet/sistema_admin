@@ -50,8 +50,14 @@ class AuthManager {
         }
         this._profileListener = uid;
         dbRef.users.child(uid).on('value', (snapshot) => {
+            const prev = this.currentProfile;
             if (snapshot.exists()) {
                 this.currentProfile = { id: uid, ...snapshot.val() };
+            } else {
+                this.currentProfile = null;
+            }
+            if (typeof App !== 'undefined' && typeof App.onProfileChanged === 'function') {
+                App.onProfileChanged(prev, this.currentProfile);
             }
         });
     }

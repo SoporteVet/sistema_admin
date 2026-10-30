@@ -188,6 +188,11 @@ class App {
     // NAVIGATION
     // ========================================================
     static navigate(view, params = {}) {
+        if (typeof DocumentacionTiUI !== 'undefined' && DocumentacionTiUI.state.dirty) {
+            if (!confirm('Hay cambios sin guardar en Documentación TI. ¿Salir?')) return;
+            DocumentacionTiUI.state.dirty = false;
+            DocumentacionTiUI._bindLeave(false);
+        }
         this.currentView = view;
         this.updateActiveNav(view);
         this.updatePageTitle(view);
@@ -224,6 +229,9 @@ class App {
                 case 'seguimiento-compartidos': await this.renderSeguimientoCompartidos(); break;
                 case 'seguimiento-sanciones-detalle': await this.renderSeguimientoSancionesDetalle(params.id); break;
                 case 'inventario': await this.renderInventario(); break;
+                case 'documentacion-ti':
+                    await DocumentacionTiUI.render(params);
+                    break;
                 default: await this.renderDashboard();
             }
             contentArea.className = 'content-area fade-in';
@@ -251,6 +259,9 @@ class App {
         if (view === 'evaluacion-nueva' || view === 'evaluacion-detalle') {
             navView = 'evaluaciones-desempeno';
         }
+        if (String(view).indexOf('documentacion') === 0) {
+            navView = 'documentacion-ti';
+        }
         document.querySelectorAll('.nav-item').forEach(item => {
             item.classList.toggle('active', item.dataset.view === navView);
         });
@@ -277,7 +288,8 @@ class App {
             'seguimiento-sanciones': { title: 'Quejas y sanciones', desc: 'Empleados ven las suyas; encargados las de su área; administración ve todo' },
             'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
             'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' },
-            'inventario': { title: 'Inventario', desc: 'Equipos y dispositivos del departamento de TI' }
+            'inventario': { title: 'Inventario', desc: 'Equipos y dispositivos del departamento de TI' },
+            'documentacion-ti': { title: 'Documentación TI', desc: 'Bitácora, biblioteca técnica y sistemas del departamento' }
         };
         const info = titles[view] || titles['dashboard'];
         document.getElementById('pageTitle').textContent = info.title;
@@ -297,7 +309,7 @@ class App {
         document.getElementById('sidebarUserRole').textContent = ROLES[user.rol]?.nombre || user.rol;
 
         document.querySelectorAll('.nav-item[data-role]').forEach(item => {
-            if (item.id === 'navSeguimientoCompartidos' || item.id === 'navInventario') return;
+            if (item.id === 'navSeguimientoCompartidos' || item.id === 'navInventario' || item.id === 'navDocumentacionTi') return;
             const roles = item.dataset.role.split(',');
             const show = roles.includes(user.rol) || roles.includes('all') || user.rol === 'admin';
             item.style.display = show ? 'flex' : 'none';
@@ -308,10 +320,27 @@ class App {
 
     static syncInventarioNav(user) {
         const permitido = typeof usuarioVeInventario === 'function' && usuarioVeInventario(user);
+        const docs = typeof usuarioVeDocumentacionTi === 'function' && usuarioVeDocumentacionTi(user);
         const section = document.getElementById('navSectionInventario');
         const item = document.getElementById('navInventario');
-        if (section) section.style.display = permitido ? 'block' : 'none';
+        const docsItem = document.getElementById('navDocumentacionTi');
+        if (section) section.style.display = (permitido || docs) ? 'block' : 'none';
         if (item) item.style.display = permitido ? 'flex' : 'none';
+        if (docsItem) docsItem.style.display = docs ? 'flex' : 'none';
+    }
+
+    static onProfileChanged(prev, next) {
+        this.updateSidebar();
+        if (next && next.activo === false) {
+            this.handleLogout();
+            Toast.error('Sesión', 'La cuenta quedó inactiva');
+            return;
+        }
+        const onTi = this.currentView === 'documentacion-ti' || this.currentView === 'inventario';
+        if (onTi && next && typeof usuarioVeDocumentacionTi === 'function' && this.currentView === 'documentacion-ti' && !usuarioVeDocumentacionTi(next)) {
+            this.navigate('dashboard');
+            Toast.error('Documentación TI', 'Su perfil ya no tiene acceso a este módulo');
+        }
     }
 
     static async refreshSanctionSharedNavItem() {
@@ -5883,6 +5912,12 @@ ${texto}</pre>
             this.navigate('ver-documento', { id: refId });
         } else if (refType === 'request' && refId && refId !== 'null') {
             this.navigate(AuthManager.isEncargado() ? 'gestionar-solicitudes' : 'solicitudes');
+        } else if (refType === 'doc_ti_actividad' && refId && refId !== 'null') {
+            this.navigate('documentacion-ti', { view: 'actividad', id: refId });
+        } else if (refType === 'doc_ti_articulo' && refId && refId !== 'null') {
+            this.navigate('documentacion-ti', { view: 'articulo', id: refId });
+        } else if (refType === 'doc_ti_sistema' && refId && refId !== 'null') {
+            this.navigate('documentacion-ti', { view: 'sistema', id: refId });
         }
     }
 
@@ -6007,6 +6042,7 @@ ${texto}</pre>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                         <button type="button" class="btn btn-sm btn-outline" onclick="App.showCartaEntrega('${id}')"><i class="fas fa-file-signature"></i> ${item.tieneCarta ? 'Firmar de nuevo' : 'Carta de entrega'}</button>
                         ${item.tieneCarta ? `<button type="button" class="btn btn-sm btn-outline" onclick="App.descargarCartaFirmada('${id}')"><i class="fas fa-file-pdf"></i> PDF firmado</button>` : ''}
+                        <button type="button" class="btn btn-sm btn-outline" onclick="App.navigate('documentacion-ti',{tab:'bitacora',equipoId:'${id}'})" title="Ver intervenciones y documentos"><i class="fas fa-book"></i> Documentación</button>
                         <button type="button" class="btn btn-sm btn-outline" onclick="App.showInventarioForm('${id}')" title="Editar"><i class="fas fa-edit"></i></button>
                         <button type="button" class="btn btn-sm btn-outline" style="border-color:var(--danger);color:var(--danger);" onclick="App.deleteInventario('${id}')" title="Eliminar"><i class="fas fa-trash"></i></button>
                     </div>
