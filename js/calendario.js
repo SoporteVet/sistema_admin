@@ -79,6 +79,20 @@ function capitalizar(texto) {
     return limpio ? limpio.charAt(0).toUpperCase() + limpio.slice(1) : '';
 }
 
+function nombreCorto(nombre) {
+    const partes = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+    if (!partes.length) return 'Colaborador';
+    if (partes.length === 1) return partes[0];
+    return `${partes[0]} ${partes[1].charAt(0)}.`;
+}
+
+function iniciales(nombre) {
+    const partes = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+    const a = (partes[0] || '?').charAt(0);
+    const b = (partes[1] || '').charAt(0);
+    return (a + b).toUpperCase();
+}
+
 function htmlCalendario(opciones) {
     const year = opciones.year;
     const month = opciones.month;
@@ -106,21 +120,27 @@ function htmlCalendario(opciones) {
         const clave = _calendarioYmd(fecha.getFullYear(), fecha.getMonth() + 1, fecha.getDate());
         const delMes = fecha.getMonth() === month;
         const eventos = porDia[clave] || [];
-        const visibles = eventos.slice(0, 2);
+        const visibles = eventos.slice(0, 3);
         const extra = eventos.length - visibles.length;
+        const hayPendiente = eventos.some((req) => req.estado !== 'aprobada');
         const marcas = visibles.map((req) => {
             const clase = req.estado === 'aprobada' ? 'aprobada' : 'pendiente';
-            return `<span class="cal-event ${clase}">${esc(req.solicitanteNombre || 'Colaborador')}</span>`;
+            const corto = nombreCorto(req.solicitanteNombre);
+            return `<span class="cal-event ${clase}" title="${esc(req.solicitanteNombre || '')}">${esc(corto)}</span>`;
         }).join('');
         const mas = extra > 0 ? `<span class="cal-more">+${extra}</span>` : '';
+        const conteo = eventos.length
+            ? `<span class="cal-count ${hayPendiente ? 'pendiente' : 'aprobada'}">${eventos.length}</span>`
+            : '';
         const clases = [
             'cal-day',
             delMes ? '' : 'cal-out',
             clave === hoyClave ? 'cal-today' : '',
-            clave === selected ? 'cal-selected' : ''
+            clave === selected ? 'cal-selected' : '',
+            eventos.length ? 'cal-busy' : ''
         ].filter(Boolean).join(' ');
         celdas.push(`<button type="button" class="${clases}" onclick="App.calendarioIr(${fecha.getFullYear()}, ${fecha.getMonth()}, ${fecha.getDate()})">
-            <span class="cal-num">${fecha.getDate()}</span>
+            <span class="cal-top"><span class="cal-num">${fecha.getDate()}</span>${conteo}</span>
             <span class="cal-events">${marcas}${mas}</span>
         </button>`);
     }
@@ -140,9 +160,11 @@ function htmlCalendario(opciones) {
             const detalle = detalleAusencia(req);
             const dep = nombreDepartamento(req.departamento);
             const clase = req.estado === 'aprobada' ? 'aprobada' : 'pendiente';
-            return `<li class="cal-person">
-                <div>
-                    <strong>${esc(req.solicitanteNombre || 'Colaborador')}</strong>
+            const nombre = req.solicitanteNombre || 'Colaborador';
+            return `<li class="cal-person ${clase}">
+                <span class="cal-avatar ${clase}">${esc(iniciales(nombre))}</span>
+                <div class="cal-person-text">
+                    <strong>${esc(nombre)}</strong>
                     <div class="cal-person-meta">${esc(req.tipoNombre || req.tipo || 'Solicitud')}${dep ? ` · ${esc(dep)}` : ''}${detalle ? ` · ${esc(detalle)}` : ''}</div>
                 </div>
                 <span class="status-badge ${clase}">${esc(estadoTxt[req.estado] || req.estado || '')}</span>
@@ -150,6 +172,7 @@ function htmlCalendario(opciones) {
         }).join('')
         : `<li class="cal-empty">Nadie tiene una ausencia registrada este día.</li>`;
 
+    const resumenDia = elegidos.length === 1 ? '1 ausencia' : `${elegidos.length} ausencias`;
     return `<div class="cal-wrap">
         <div class="cal-toolbar">
             <div class="cal-nav">
@@ -157,20 +180,28 @@ function htmlCalendario(opciones) {
                 <h2>${esc(tituloMes)}</h2>
                 <button type="button" class="btn btn-outline btn-sm" onclick="App.calendarioMes(1)" aria-label="Mes siguiente"><i class="fas fa-chevron-right"></i></button>
             </div>
-            <button type="button" class="btn btn-outline btn-sm" onclick="App.calendarioHoy()">Hoy</button>
+            <div class="cal-toolbar-side">
+                <div class="cal-legend">
+                    <span class="cal-event aprobada">Aprobada</span>
+                    <span class="cal-event pendiente">Pendiente</span>
+                </div>
+                <button type="button" class="btn btn-outline btn-sm" onclick="App.calendarioHoy()">Hoy</button>
+            </div>
         </div>
-        <p class="cal-hint">Aparecen las solicitudes de vacaciones, permisos y días en que un colaborador va a faltar. Las rechazadas no se muestran.</p>
-        <div class="cal-legend">
-            <span class="cal-event aprobada">Aprobada</span>
-            <span class="cal-event pendiente">Pendiente de aprobar</span>
-        </div>
-        <div class="cal-grid">
-            ${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((dia) => `<div class="cal-dow">${dia}</div>`).join('')}
-            ${celdas.join('')}
-        </div>
-        <div class="cal-detail">
-            <h3>${esc(tituloDia)}</h3>
-            <ul>${lista}</ul>
+        <div class="cal-board">
+            <div class="cal-main">
+                <div class="cal-grid">
+                    ${['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'].map((dia) => `<div class="cal-dow">${dia}</div>`).join('')}
+                    ${celdas.join('')}
+                </div>
+            </div>
+            <aside class="cal-detail">
+                <div class="cal-detail-head">
+                    <h3>${esc(tituloDia)}</h3>
+                    <span class="cal-detail-count">${elegidos.length ? resumenDia : 'Sin ausencias'}</span>
+                </div>
+                <ul>${lista}</ul>
+            </aside>
         </div>
     </div>`;
 }
