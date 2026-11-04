@@ -2227,6 +2227,78 @@ textarea.form-control {
     .doc-ti-mdarea { min-height: 280px; }
 }
 
+/* ============================================================
+   CALENDARIO DE AUSENCIAS
+   ============================================================ */
+.cal-wrap { display: flex; flex-direction: column; gap: 14px; }
+.cal-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.cal-nav { display: flex; align-items: center; gap: 10px; }
+.cal-nav h2 { font-size: 1.25rem; min-width: 180px; text-align: center; }
+.cal-hint { color: var(--text-secondary); font-size: 0.85rem; }
+.cal-legend { display: flex; gap: 8px; flex-wrap: wrap; }
+.cal-legend .cal-event { font-size: 0.75rem; padding: 3px 8px; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.cal-dow { text-align: center; font-size: 0.72rem; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; }
+.cal-day {
+    min-height: 92px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 6px;
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    color: inherit;
+    font-weight: 500;
+}
+.cal-day:hover { border-color: var(--primary-light); }
+.cal-out { opacity: 0.45; }
+.cal-today { border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.cal-selected { background: rgba(21, 101, 192, 0.08); }
+.cal-num { font-weight: 700; font-size: 0.85rem; }
+.cal-events { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cal-event {
+    display: block;
+    font-size: 0.68rem;
+    line-height: 1.25;
+    padding: 1px 4px;
+    border-radius: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cal-event.aprobada { background: rgba(46, 125, 50, 0.14); color: var(--success); }
+.cal-event.pendiente { background: rgba(245, 127, 23, 0.18); color: #e65100; }
+.cal-more { font-size: 0.68rem; color: var(--text-secondary); }
+.cal-detail {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+}
+.cal-detail h3 { font-size: 1rem; margin-bottom: 10px; }
+.cal-detail ul { display: flex; flex-direction: column; gap: 10px; }
+.cal-person { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+.cal-person-meta { color: var(--text-secondary); font-size: 0.82rem; }
+.cal-empty { color: var(--text-secondary); }
+
+@media (max-width: 640px) {
+    .cal-day { min-height: 52px; padding: 4px; }
+    .cal-nav h2 { min-width: 0; font-size: 1.05rem; }
+    .cal-day .cal-event {
+        width: 8px;
+        height: 8px;
+        padding: 0;
+        border-radius: 50%;
+        font-size: 0;
+        display: inline-block;
+    }
+    .cal-events { flex-direction: row; flex-wrap: wrap; }
+    .cal-more { display: none; }
+}
+
 /* Print styles */
 @media print {
     .sidebar, .main-header, .no-print {

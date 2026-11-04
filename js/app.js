@@ -232,6 +232,7 @@ class App {
                 case 'documentacion-ti':
                     await DocumentacionTiUI.render(params);
                     break;
+                case 'calendario': await this.renderCalendario(); break;
                 default: await this.renderDashboard();
             }
             contentArea.className = 'content-area fade-in';
@@ -289,7 +290,8 @@ class App {
             'seguimiento-compartidos': { title: 'Seguimientos compartidos conmigo', desc: 'Casos donde tiene permiso de lectura' },
             'seguimiento-sanciones-detalle': { title: 'Detalle del seguimiento', desc: 'Texto del caso y etapas del flujo' },
             'inventario': { title: 'Inventario', desc: 'Equipos y dispositivos del departamento de TI' },
-            'documentacion-ti': { title: 'Documentación TI', desc: 'Bitácora, biblioteca técnica y sistemas del departamento' }
+            'documentacion-ti': { title: 'Documentación TI', desc: 'Bitácora, biblioteca técnica y sistemas del departamento' },
+            'calendario': { title: 'Calendario', desc: 'Días en que un colaborador va a faltar' }
         };
         const info = titles[view] || titles['dashboard'];
         document.getElementById('pageTitle').textContent = info.title;
@@ -334,6 +336,10 @@ class App {
         if (next && next.activo === false) {
             this.handleLogout();
             Toast.error('Sesión', 'La cuenta quedó inactiva');
+            return;
+        }
+        if (this.currentView === 'calendario' && next && typeof usuarioVeCalendario === 'function' && !usuarioVeCalendario(next)) {
+            this.navigate('dashboard');
             return;
         }
         const onTi = this.currentView === 'documentacion-ti' || this.currentView === 'inventario';
@@ -6332,6 +6338,75 @@ ${texto}</pre>
         } catch (error) {
             Toast.error('Inventario', error.message || 'No se pudo eliminar');
         }
+    }
+
+    // ========================================================
+    // CALENDARIO DE AUSENCIAS
+    // ========================================================
+    static async renderCalendario() {
+        const content = document.getElementById('contentArea');
+        const user = AuthManager.getUser();
+        if (typeof usuarioVeCalendario !== 'function' || !usuarioVeCalendario(user)) {
+            content.innerHTML = `<div class="empty-state"><i class="fas fa-lock"></i><h3>Acceso denegado</h3><p>El calendario está disponible para administración y encargados de área.</p></div>`;
+            return;
+        }
+        const ahora = new Date();
+        if (!this._cal) {
+            this._cal = { year: ahora.getFullYear(), month: ahora.getMonth(), selected: _calendarioYmd(ahora.getFullYear(), ahora.getMonth() + 1, ahora.getDate()) };
+        }
+        try {
+            const todas = await RequestManager.getAll();
+            this._calItems = solicitudesParaCalendario(todas, user);
+            this.paintCalendario();
+        } catch (error) {
+            console.error('Error cargando calendario:', error);
+            content.innerHTML = `<div class="empty-state"><i class="fas fa-exclamation-triangle" style="color:var(--danger);"></i><h3>No se pudo cargar el calendario</h3><p>${this.escapeHtml(error.message || 'Error de conexión')}</p></div>`;
+        }
+    }
+
+    static paintCalendario() {
+        const content = document.getElementById('contentArea');
+        if (!content || this.currentView !== 'calendario' || !this._cal) return;
+        content.innerHTML = htmlCalendario({
+            year: this._cal.year,
+            month: this._cal.month,
+            selected: this._cal.selected,
+            items: this._calItems || [],
+            escapeHtml: (value) => this.escapeHtml(value),
+            nombreDepartamento: (codigo) => {
+                const dep = (this._depsMap && this._depsMap[codigo]) || (typeof DEPARTAMENTOS !== 'undefined' && DEPARTAMENTOS[codigo]);
+                return (dep && dep.nombre) || codigo || '';
+            }
+        });
+    }
+
+    static calendarioMes(delta) {
+        if (!this._cal) return;
+        const fecha = new Date(this._cal.year, this._cal.month + delta, 1);
+        this._cal.year = fecha.getFullYear();
+        this._cal.month = fecha.getMonth();
+        this._cal.selected = _calendarioYmd(this._cal.year, this._cal.month + 1, 1);
+        this.paintCalendario();
+    }
+
+    static calendarioHoy() {
+        const ahora = new Date();
+        this._cal = {
+            year: ahora.getFullYear(),
+            month: ahora.getMonth(),
+            selected: _calendarioYmd(ahora.getFullYear(), ahora.getMonth() + 1, ahora.getDate())
+        };
+        this.paintCalendario();
+    }
+
+    static calendarioIr(year, month, day) {
+        const fecha = new Date(year, month, day);
+        this._cal = {
+            year: fecha.getFullYear(),
+            month: fecha.getMonth(),
+            selected: _calendarioYmd(fecha.getFullYear(), fecha.getMonth() + 1, fecha.getDate())
+        };
+        this.paintCalendario();
     }
 
     // ========================================================
