@@ -2287,6 +2287,7 @@ textarea.form-control {
 }
 .cal-count.aprobada { background: var(--success); }
 .cal-count.pendiente { background: #ef6c00; }
+.cal-count.gerencia { background: #6a1b9a; }
 .cal-events { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .cal-event {
     display: block;
@@ -2302,6 +2303,7 @@ textarea.form-control {
 }
 .cal-event.aprobada { background: rgba(46, 125, 50, 0.12); color: #1b5e20; }
 .cal-event.pendiente { background: rgba(239, 108, 0, 0.14); color: #e65100; }
+.cal-event.gerencia { background: rgba(106, 27, 154, 0.14); color: #6a1b9a; }
 .cal-more { font-size: 0.68rem; font-weight: 700; color: var(--text-secondary); padding-left: 2px; }
 .cal-detail {
     background: var(--bg-card);
@@ -2341,6 +2343,8 @@ textarea.form-control {
 }
 .cal-avatar.aprobada { background: var(--success); }
 .cal-avatar.pendiente { background: #ef6c00; }
+.cal-avatar.gerencia { background: #6a1b9a; }
+.status-badge.gerencia { background: rgba(106, 27, 154, 0.12); color: #6a1b9a; }
 .cal-person-text { grid-area: text; min-width: 0; }
 .cal-person-text strong { display: block; line-height: 1.25; }
 .cal-person .status-badge { grid-area: badge; justify-self: start; }

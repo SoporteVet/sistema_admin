@@ -74,6 +74,18 @@ function solicitudesParaCalendario(lista, user) {
     });
 }
 
+function claseCalendario(estado) {
+    if (estado === 'aprobada') return 'aprobada';
+    if (estado === 'pendiente_gerencia') return 'gerencia';
+    return 'pendiente';
+}
+
+function claseConteo(eventos) {
+    if (eventos.some((req) => req.estado === 'pendiente' || req.estado === 'pendiente_ti')) return 'pendiente';
+    if (eventos.some((req) => req.estado === 'pendiente_gerencia')) return 'gerencia';
+    return 'aprobada';
+}
+
 function capitalizar(texto) {
     const limpio = String(texto || '');
     return limpio ? limpio.charAt(0).toUpperCase() + limpio.slice(1) : '';
@@ -122,15 +134,14 @@ function htmlCalendario(opciones) {
         const eventos = porDia[clave] || [];
         const visibles = eventos.slice(0, 3);
         const extra = eventos.length - visibles.length;
-        const hayPendiente = eventos.some((req) => req.estado !== 'aprobada');
         const marcas = visibles.map((req) => {
-            const clase = req.estado === 'aprobada' ? 'aprobada' : 'pendiente';
+            const clase = claseCalendario(req.estado);
             const corto = nombreCorto(req.solicitanteNombre);
             return `<span class="cal-event ${clase}" title="${esc(req.solicitanteNombre || '')}">${esc(corto)}</span>`;
         }).join('');
         const mas = extra > 0 ? `<span class="cal-more">+${extra}</span>` : '';
         const conteo = eventos.length
-            ? `<span class="cal-count ${hayPendiente ? 'pendiente' : 'aprobada'}">${eventos.length}</span>`
+            ? `<span class="cal-count ${claseConteo(eventos)}">${eventos.length}</span>`
             : '';
         const clases = [
             'cal-day',
@@ -153,13 +164,13 @@ function htmlCalendario(opciones) {
         aprobada: 'Aprobada',
         pendiente: 'Pendiente',
         pendiente_ti: 'Pendiente',
-        pendiente_gerencia: 'Pendiente'
+        pendiente_gerencia: 'Firma de gerencia'
     };
     const lista = elegidos.length
         ? elegidos.map((req) => {
             const detalle = detalleAusencia(req);
             const dep = nombreDepartamento(req.departamento);
-            const clase = req.estado === 'aprobada' ? 'aprobada' : 'pendiente';
+            const clase = claseCalendario(req.estado);
             const nombre = req.solicitanteNombre || 'Colaborador';
             return `<li class="cal-person ${clase}">
                 <span class="cal-avatar ${clase}">${esc(iniciales(nombre))}</span>
@@ -184,6 +195,7 @@ function htmlCalendario(opciones) {
                 <div class="cal-legend">
                     <span class="cal-event aprobada">Aprobada</span>
                     <span class="cal-event pendiente">Pendiente</span>
+                    <span class="cal-event gerencia">Firma de gerencia</span>
                 </div>
                 <button type="button" class="btn btn-outline btn-sm" onclick="App.calendarioHoy()">Hoy</button>
             </div>
