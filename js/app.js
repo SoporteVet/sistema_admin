@@ -6,7 +6,6 @@
 class App {
     static currentView = 'dashboard';
     static isLoading = false;
-    static _forcePasswordModal = false;
     /** Origen del detalle de ticket de sanciones: 'manager' | 'shared' */
     static _sanctionDetalleSource = 'manager';
 
@@ -139,9 +138,6 @@ class App {
             errorEl.classList.remove('show');
             this.showApp();
             Toast.success('Bienvenido', `Hola, ${result.user.nombre}!`);
-            if (result.requirePasswordChange) {
-                this.showChangePasswordModal(true);
-            }
         } else {
             errorEl.textContent = result.message;
             errorEl.classList.add('show');
@@ -4734,7 +4730,7 @@ ${texto}</pre>
                 <div class="card-header">
                     <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
                     <div style="display:flex;gap:8px;">
-                        <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                        <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal()"><i class="fas fa-key"></i> Mi Contraseña</button>
                         <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
                     </div>
                 </div>
@@ -4758,7 +4754,7 @@ ${texto}</pre>
                     <div class="card-header">
                         <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
                         <div style="display:flex;gap:8px;">
-                            <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                            <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal()"><i class="fas fa-key"></i> Mi Contraseña</button>
                             <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
                         </div>
                     </div>
@@ -4785,7 +4781,7 @@ ${texto}</pre>
                 <div class="card-header">
                     <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
                     <div style="display:flex;gap:8px;">
-                        <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                        <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal()"><i class="fas fa-key"></i> Mi Contraseña</button>
                         <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus"></i> Nuevo Usuario</button>
                     </div>
                 </div>
@@ -4816,7 +4812,7 @@ ${texto}</pre>
                     <div class="card-header">
                         <h3><i class="fas fa-users-cog" style="margin-right:8px;color:var(--primary);"></i>Gestión de Usuarios</h3>
                         <div style="display:flex;gap:8px;">
-                            <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal(false)"><i class="fas fa-key"></i> Mi Contraseña</button>
+                            <button class="btn btn-outline btn-sm" onclick="App.showChangePasswordModal()"><i class="fas fa-key"></i> Mi Contraseña</button>
                             <button class="btn btn-primary btn-sm" onclick="App.showCreateUserModal()"><i class="fas fa-user-plus" style="vertical-align:middle;margin-right:6px;"></i> Nuevo Usuario</button>
                         </div>
                     </div>
@@ -4879,9 +4875,6 @@ ${texto}</pre>
                 <td><span class="status-badge ${u.activo ? 'aprobada' : 'rechazada'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
                 <td><div style="display:flex;gap:6px;flex-wrap:wrap;">
                     <button class="btn btn-sm btn-outline" onclick="App.showEditUserModal('${u.id}')" title="Editar"><i class="fas fa-edit"></i></button>
-                    <button class="btn btn-sm btn-outline" onclick="App.handleResetUserPassword('${u.id}')" title="Forzar cambio de contraseña" style="border-color:var(--warning);color:var(--warning);">
-                        <i class="fas fa-unlock-alt"></i>
-                    </button>
                     <button class="btn btn-sm btn-outline" onclick="App.showManageCodeModal('${u.id}')" title="Gestionar código de firma" style="border-color:var(--primary);color:var(--primary);">
                         <i class="fas fa-key"></i>
                     </button>
@@ -4982,9 +4975,8 @@ ${texto}</pre>
                 <div class="form-group"><label>Puesto <span class="required">*</span></label><input type="text" class="form-control" id="newUserPuesto" required></div>
                 <div class="form-group"><label>Email <span class="required">*</span></label><input type="email" class="form-control" id="newUserEmail" required></div>
                 <div class="form-group">
-                    <label>Contraseña temporal <span class="required">*</span> (mín. 6 caracteres)</label>
+                    <label>Contraseña <span class="required">*</span> (mín. 6 caracteres)</label>
                     <input type="password" class="form-control" id="newUserPassword" value="123456" required minlength="6">
-                    <small style="display:block;margin-top:6px;color:var(--text-light);">El usuario deberá cambiarla al primer ingreso.</small>
                 </div>
                 <div class="form-row">
                     <div class="form-group"><label>Rol <span class="required">*</span></label><select class="form-control" id="newUserRol" required onchange="App.syncEncargadoDepartamentosUI('new')"><option value="">Seleccionar...</option>
@@ -5049,15 +5041,8 @@ ${texto}</pre>
         }
     }
 
-    static showChangePasswordModal(forced = false) {
-        this._forcePasswordModal = Boolean(forced);
-        const forcedHtml = forced
-            ? `<div style="padding:12px;border-radius:8px;background:var(--warning-light);color:var(--warning);margin-bottom:14px;">
-                    <i class="fas fa-exclamation-triangle"></i> Debe cambiar su contraseña temporal para continuar usando el sistema.
-               </div>`
-            : '';
+    static showChangePasswordModal() {
         this.showModal('Cambiar Mi Contraseña', `
-            ${forcedHtml}
             <form onsubmit="App.handleChangePassword(event)">
                 <div class="form-group">
                     <label>Contraseña actual</label>
@@ -5072,7 +5057,7 @@ ${texto}</pre>
                     <input type="password" class="form-control" id="confirmPasswordInput" required minlength="6">
                 </div>
                 <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
-                    ${forced ? '' : '<button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>'}
+                    <button type="button" class="btn btn-outline" onclick="App.closeModal()">Cancelar</button>
                     <button type="submit" class="btn btn-primary" id="btnChangePassword"><i class="fas fa-save"></i> Guardar contraseña</button>
                 </div>
             </form>
@@ -5110,34 +5095,11 @@ ${texto}</pre>
             return;
         }
 
-        this._forcePasswordModal = false;
         this.closeModal();
         Toast.success('Éxito', 'Su contraseña personal se actualizó correctamente');
         if (this.currentView === 'usuarios') {
             this.navigate('usuarios');
         }
-    }
-
-    static async handleResetUserPassword(userId) {
-        const user = await AuthManager.getUserById(userId);
-        if (!user || !user.email) {
-            Toast.error('Error', 'No se encontró el usuario o su correo');
-            return;
-        }
-
-        const markResult = await AuthManager.markUserMustChangePassword(userId, true);
-        if (!markResult.success) {
-            Toast.error('Error', markResult.message || 'No se pudo actualizar el estado del usuario');
-            return;
-        }
-
-        const resetResult = await AuthManager.sendPasswordReset(user.email);
-        if (!resetResult.success) {
-            Toast.warning('Aviso', 'Se marcó el cambio obligatorio, pero no se pudo enviar correo automático');
-            return;
-        }
-
-        Toast.success('Listo', `Se envió correo de restablecimiento a ${user.email}`);
     }
 
     static async showEditUserModal(userId) {
@@ -6421,7 +6383,6 @@ ${texto}</pre>
     }
 
     static closeModal() {
-        if (this._forcePasswordModal) return;
         document.getElementById('modalOverlay').classList.remove('open');
     }
 }

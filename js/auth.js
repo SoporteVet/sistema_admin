@@ -116,8 +116,7 @@ class AuthManager {
             }
 
             this.listenProfile(result.user.uid);
-            const requirePasswordChange = Boolean(this.currentProfile.debeCambiarPassword);
-            return { success: true, user: this.currentProfile, requirePasswordChange };
+            return { success: true, user: this.currentProfile };
         } catch (error) {
             console.error('Error login:', error);
             let msg = 'Error al iniciar sesión';
@@ -319,7 +318,6 @@ class AuthManager {
                 rol: userData.rol,
                 departamento: userData.departamento,
                 activo: true,
-                debeCambiarPassword: true,
                 fechaCreacion: new Date().toISOString()
             };
             if (userData.cedula) profile.cedula = String(userData.cedula).trim();
@@ -397,7 +395,6 @@ class AuthManager {
             await authUser.reauthenticateWithCredential(credential);
             await authUser.updatePassword(newPassword);
             await dbRef.users.child(authUser.uid).update({
-                debeCambiarPassword: false,
                 fechaCambioPassword: new Date().toISOString()
             });
             await this.loadProfile(authUser.uid);
@@ -409,35 +406,6 @@ class AuthManager {
                 case 'auth/wrong-password': msg = 'La contraseña actual es incorrecta'; break;
                 case 'auth/weak-password': msg = 'La nueva contraseña debe tener al menos 6 caracteres'; break;
                 case 'auth/requires-recent-login': msg = 'Por seguridad, vuelva a iniciar sesión e intente de nuevo'; break;
-            }
-            return { success: false, message: msg };
-        }
-    }
-
-    // Marcar que un usuario debe cambiar su contraseña al volver a iniciar sesión
-    static async markUserMustChangePassword(uid, mustChange = true) {
-        try {
-            await dbRef.users.child(uid).update({
-                debeCambiarPassword: Boolean(mustChange)
-            });
-            return { success: true };
-        } catch (error) {
-            console.error('Error marcando cambio obligatorio de contraseña:', error);
-            return { success: false, message: 'No se pudo actualizar la política de contraseña' };
-        }
-    }
-
-    // Enviar correo de restablecimiento de contraseña
-    static async sendPasswordReset(email) {
-        try {
-            await auth.sendPasswordResetEmail(email);
-            return { success: true };
-        } catch (error) {
-            console.error('Error enviando restablecimiento:', error);
-            let msg = 'No se pudo enviar el correo de restablecimiento';
-            switch (error.code) {
-                case 'auth/invalid-email': msg = 'El correo del usuario es inválido'; break;
-                case 'auth/user-not-found': msg = 'No existe una cuenta con ese correo'; break;
             }
             return { success: false, message: msg };
         }
