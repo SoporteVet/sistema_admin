@@ -27,7 +27,7 @@ function _calendarioParseYmd(value) {
 }
 
 function fechasDeAusencia(req) {
-    if (!req || req.estado === 'rechazada' || !CALENDARIO_AUSENCIAS[req.tipo]) return [];
+    if (!req || req.estado === 'rechazada' || req.estado === 'anulada' || !CALENDARIO_AUSENCIAS[req.tipo]) return [];
     const datos = req.datos || {};
     const inicio = _calendarioParseYmd(datos.fecha_inicio);
     const fin = _calendarioParseYmd(datos.fecha_fin);

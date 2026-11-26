@@ -94,6 +94,7 @@ class App {
 
     static claseCardEstadoSolicitud(estado) {
         if (estado === 'pendiente_ti' || estado === 'pendiente_gerencia') return 'pendiente';
+        if (estado === 'anulada') return 'rechazada';
         return estado || 'pendiente';
     }
 

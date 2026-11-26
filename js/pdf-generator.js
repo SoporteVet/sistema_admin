@@ -999,8 +999,8 @@ class PDFGenerator {
         const firmaAdmin = req.firmaAdmin || null;
         const revisionTI = req.revisionTI || null;
 
-        const estadoBadgeColor = req.estado === 'aprobada' ? '#2e7d32' : req.estado === 'rechazada' ? '#c62828' : '#e65100';
-        let estadoTexto = req.estado === 'aprobada' ? 'APROBADA' : req.estado === 'rechazada' ? 'RECHAZADA' : 'PENDIENTE';
+        const estadoBadgeColor = req.estado === 'aprobada' ? '#2e7d32' : (req.estado === 'rechazada' || req.estado === 'anulada') ? '#c62828' : '#e65100';
+        let estadoTexto = req.estado === 'aprobada' ? 'APROBADA' : req.estado === 'rechazada' ? 'RECHAZADA' : req.estado === 'anulada' ? 'ANULADA' : 'PENDIENTE';
         if (req.estado === 'pendiente') estadoTexto = 'PEND. ENCARGADO';
         if (req.estado === 'pendiente_ti') estadoTexto = 'PEND. REVISIÓN TI';
         if (req.estado === 'pendiente_gerencia') estadoTexto = 'PEND. GERENCIA';

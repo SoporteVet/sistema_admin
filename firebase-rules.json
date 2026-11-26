@@ -151,7 +151,7 @@
           ".validate": "newData.isString() && newData.val().length > 0"
         },
         "estado": {
-          ".validate": "newData.isString() && (newData.val() === 'pendiente' || newData.val() === 'pendiente_ti' || newData.val() === 'pendiente_gerencia' || newData.val() === 'aprobada' || newData.val() === 'rechazada')"
+          ".validate": "newData.isString() && (newData.val() === 'pendiente' || newData.val() === 'pendiente_ti' || newData.val() === 'pendiente_gerencia' || newData.val() === 'aprobada' || newData.val() === 'rechazada' || newData.val() === 'anulada')"
         },
         "solicitante": {
           ".validate": "newData.isString() && newData.val() === auth.uid"
